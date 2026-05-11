@@ -1,0 +1,6 @@
+/continuum-plugin-audiobooks
+*.test
+*.out
+.envrc
+node_modules/
+web/dist/

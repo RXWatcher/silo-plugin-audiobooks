@@ -2,7 +2,7 @@ module github.com/ContinuumApp/continuum-plugin-audiobooks
 
 go 1.26.0
 
-replace github.com/ContinuumApp/continuum-plugin-sdk => /opt/continuum_plugins/continuum-plugin-sdk-rh
+replace github.com/ContinuumApp/continuum-plugin-sdk => /opt/continuum_plugins/continuum-plugin-sdk
 
 require (
 	github.com/ContinuumApp/continuum-plugin-sdk v0.0.0-00010101000000-000000000000

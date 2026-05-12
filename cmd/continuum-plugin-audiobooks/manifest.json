@@ -1,0 +1,56 @@
+{
+  "plugin_id": "continuum.audiobooks",
+  "version": "0.1.0",
+  "checksum": "__CHECKSUM__",
+  "continuum_api_version": "v1",
+  "capabilities": [
+    {
+      "type": "http_routes.v1",
+      "id": "portal",
+      "display_name": "Audiobooks",
+      "description": "Customer-facing audiobook browser, player, request flow, and ABS-mobile API."
+    },
+    {
+      "type": "event_consumer.v1",
+      "id": "status_watcher",
+      "display_name": "Backend status watcher",
+      "description": "Tracks request fulfillment and import status from configured audiobook backends.",
+      "subscriptions": [
+        "plugin.continuum.bookwarehouse-audio.request_acknowledged",
+        "plugin.continuum.bookwarehouse-audio.request_failed",
+        "plugin.continuum.bookwarehouse-audio.audiobook_imported",
+        "plugin.continuum.bookwarehouse-audio.audiobook_failed"
+      ]
+    },
+    {
+      "type": "scheduled_task.v1",
+      "id": "request_reconciler",
+      "display_name": "Audiobook request reconciler",
+      "description": "Polls backend for missed status events; closes idle ABS sessions; LRU-evicts cached audio."
+    }
+  ],
+  "http_routes": [
+    {"id": "api",          "method": "*",   "path": "/api/v1/*",                "access": "authenticated"},
+    {"id": "abs_public",   "method": "GET", "path": "/abs/public/*",            "access": "public"},
+    {"id": "abs_login",    "method": "POST","path": "/abs/api/login",           "access": "public"},
+    {"id": "abs_refresh",  "method": "POST","path": "/abs/api/auth/refresh",    "access": "public"},
+    {"id": "abs_ping",     "method": "GET", "path": "/abs/api/ping",            "access": "public"},
+    {"id": "abs",          "method": "*",   "path": "/abs/*",                   "access": "authenticated"},
+    {"id": "assets",       "method": "GET", "path": "/assets/*",                "access": "public"},
+    {"id": "spa",          "method": "GET", "path": "/*",                       "access": "authenticated", "navigable": true, "navigation_label": "Audiobooks", "navigation_kind": "user"}
+  ],
+  "global_config_schema": [
+    {
+      "key": "database_url",
+      "title": "Postgres connection string",
+      "description": "DSN for the dedicated audiobooks schema (e.g. postgres://plugin_audiobooks:...@host:5432/continuum?search_path=audiobooks&sslmode=disable).",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"]}",
+      "required": true,
+      "admin_form": {
+        "fields": [
+          {"key": "value", "label": "Connection URL", "control": "ADMIN_FORM_CONTROL_PASSWORD", "required": true, "secret": true}
+        ]
+      }
+    }
+  ]
+}

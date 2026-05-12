@@ -1,0 +1,81 @@
+// Package server is the audiobooks portal's chi-mounted HTTP handler. It
+// composes the API routes (/api/v1/*), ABS-compat routes (/abs/api/*), and
+// the embedded SPA (/* fallback). The httproutes package wraps this handler
+// for the SDK's HttpRoutes.v1 RPC.
+package server
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/abs"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/auth"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/event"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/store"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/streaming"
+)
+
+// Deps wires the server's collaborators. SPA may be nil during early dev.
+type Deps struct {
+	Store      *store.Store
+	Backend    *backend.Client
+	Events     *event.Publisher
+	Streaming  *streaming.Router
+	ABS        *abs.Handler
+	SPA        http.Handler
+	HostBaseFn func() string
+}
+
+// Server wraps the chi handler with the configured deps.
+type Server struct{ d Deps }
+
+// New constructs a Server from Deps.
+func New(d Deps) *Server { return &Server{d: d} }
+
+// Handler returns the fully composed http.Handler. Routes:
+//   - /api/v1/*           authenticated REST API
+//   - /abs/api/*          ABS-mobile-compat surface (JWT-validated)
+//   - /abs/public/*       session-scoped streaming (token in query)
+//   - everything else     SPA fallback
+func (s *Server) Handler() http.Handler {
+	r := chi.NewRouter()
+	r.Use(middleware.Recoverer)
+	r.Use(auth.Middleware)
+
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/health", s.handleHealth)
+		s.mountAudiobookRoutes(r)
+		s.mountUserStateRoutes(r)
+		s.mountRequestRoutes(r)
+		s.mountCollectionRoutes(r)
+		s.mountAdminRoutes(r)
+		s.mountStreamRoutes(r)
+	})
+
+	if s.d.ABS != nil {
+		s.d.ABS.Mount(r)
+	}
+
+	if s.d.SPA != nil {
+		r.Get("/*", s.d.SPA.ServeHTTP)
+	}
+	return r
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]any{"error": msg})
+}

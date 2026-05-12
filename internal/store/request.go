@@ -147,6 +147,22 @@ func (s *Store) SetRequestExternal(ctx context.Context, id, externalID, status s
 	return nil
 }
 
+// GetByExternalIDStub reads the request matching external_id. Returns
+// ErrNotFound when missing.
+func (s *Store) GetByExternalIDStub(ctx context.Context, externalID string) (Request, error) {
+	if externalID == "" {
+		return Request{}, ErrNotFound
+	}
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, user_id, title, COALESCE(author,''), COALESCE(isbn,''), status,
+		       target_plugin_id, COALESCE(external_id,''),
+		       COALESCE(denied_reason,''), COALESCE(failure_reason,''),
+		       created_at, updated_at, fulfilled_at
+		FROM request WHERE external_id = $1
+	`, externalID)
+	return scanRequest(row)
+}
+
 // MarkRequestFulfilled sets status='imported' and fulfilled_at=now() for the
 // request matching external_id.
 func (s *Store) MarkRequestFulfilled(ctx context.Context, externalID string) error {

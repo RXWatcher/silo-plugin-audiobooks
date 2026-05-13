@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -23,6 +24,7 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Post("/admin/sessions/{id}/close", s.handleAdminCloseSession)
 	r.Get("/admin/tokens", s.handleAdminListTokens)
 	r.Post("/admin/tokens/{id}/revoke", s.handleAdminRevokeToken)
+	r.Post("/admin/generate-streaming-secret", s.handleGenerateStreamingSecret)
 }
 
 func (s *Server) handleGetBackendConfig(w http.ResponseWriter, r *http.Request) {
@@ -232,4 +234,22 @@ func (s *Server) handleAdminRevokeToken(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGenerateStreamingSecret generates a cryptographically-random 32-byte
+// value and returns it base64-encoded. The admin pastes this value into both
+// this plugin's cdn_signing_secret global config and the audiobooksdb plugin's
+// stream_signing_secret config. Nothing is persisted here — the admin is
+// responsible for saving the value.
+func (s *Server) handleGenerateStreamingSecret(w http.ResponseWriter, r *http.Request) {
+	if _, ok := auth.RequireAdmin(w, r); !ok {
+		return
+	}
+	b, err := randomBytes(32)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "entropy: "+err.Error())
+		return
+	}
+	secret := base64.StdEncoding.EncodeToString(b)
+	writeJSON(w, http.StatusOK, map[string]string{"secret": secret})
 }

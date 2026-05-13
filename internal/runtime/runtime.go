@@ -14,7 +14,10 @@ import (
 // is a host-managed global config; all other settings live in the portal's
 // backend_config table and are written via the admin SPA.
 type Config struct {
-	DatabaseURL string `json:"database_url"`
+	DatabaseURL          string `json:"database_url"`
+	StandaloneHTTPListen string `json:"standalone_http_listen"`
+	CDNHostname          string `json:"cdn_hostname"`
+	CDNSigningSecret     string `json:"cdn_signing_secret"`
 }
 
 // Configured reports whether the required fields are set.
@@ -50,6 +53,12 @@ func (s *Server) Configure(_ context.Context, req *pluginv1.ConfigureRequest) (*
 		switch e.GetKey() {
 		case "database_url":
 			cfg.DatabaseURL = stringFromValue(m["value"], firstString(m))
+		case "standalone_http_listen":
+			cfg.StandaloneHTTPListen = stringFromValue(m["value"], firstString(m))
+		case "cdn_hostname":
+			cfg.CDNHostname = stringFromValue(m["value"], firstString(m))
+		case "cdn_signing_secret":
+			cfg.CDNSigningSecret = stringFromValue(m["value"], firstString(m))
 		}
 	}
 	if cfg.DatabaseURL == "" {

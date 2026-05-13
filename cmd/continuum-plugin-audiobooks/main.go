@@ -10,9 +10,14 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"os"
+	"os/signal"
 	goruntime "runtime"
+	"sync"
 	"sync/atomic"
+	"syscall"
+	"time"
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -50,9 +55,12 @@ func main() {
 	httpSrv := httproutes.NewServer()
 
 	var (
-		poolPtr  atomic.Pointer[pgxpool.Pool]
-		storePtr atomic.Pointer[store.Store]
-		cachePtr atomic.Pointer[streaming.Cache]
+		poolPtr           atomic.Pointer[pgxpool.Pool]
+		storePtr          atomic.Pointer[store.Store]
+		cachePtr          atomic.Pointer[streaming.Cache]
+		standaloneOnce    sync.Once
+		standaloneAddr    atomic.Value          // string; tracks the bound addr so reconfigures can warn on change
+		standaloneSrvPtr  atomic.Pointer[http.Server]
 	)
 
 	// Host base URL used to build self-referential public stream URLs in
@@ -67,7 +75,18 @@ func main() {
 	rt := pluginrt.New(manifest, func(cfg pluginrt.Config) error {
 		ctx := context.Background()
 
-		p, err := pgxpool.New(ctx, cfg.DatabaseURL)
+		// Explicit MaxConns cap. The pgx default scales with GOMAXPROCS and
+		// can be as low as 4; the portal + scheduler + ABS streaming mix
+		// can starve under that. 16 is generous without saturating a
+		// shared Postgres. Operators override via DSN (?pool_max_conns=N).
+		pcfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+		if err != nil {
+			return fmt.Errorf("parse db: %w", err)
+		}
+		if pcfg.MaxConns < 16 {
+			pcfg.MaxConns = 16
+		}
+		p, err := pgxpool.NewWithConfig(ctx, pcfg)
 		if err != nil {
 			return fmt.Errorf("pgxpool: %w", err)
 		}
@@ -112,6 +131,7 @@ func main() {
 			},
 			HostBaseFn: func() string { return hostBase },
 			InstallID:  func() string { return "continuum.audiobooks" },
+			CDNFn:      func() (string, string) { return cfg.CDNHostname, cfg.CDNSigningSecret },
 		})
 
 		srv := server.New(server.Deps{
@@ -125,6 +145,39 @@ func main() {
 		})
 		httpSrv.SetHandler(srv.Handler())
 
+		// Optional standalone HTTP listener for reverse-proxied client apps
+		// (e.g. abs.example.com → audiobookshelf mobile app). See the
+		// standalone_http_listen field in manifest.json. Bound once at first
+		// Configure; subsequent changes require a plugin restart.
+		if addr := cfg.StandaloneHTTPListen; addr != "" {
+			started := false
+			standaloneOnce.Do(func() {
+				started = true
+				standaloneAddr.Store(addr)
+				sl := &http.Server{
+					Addr:              addr,
+					Handler:           httpSrv,
+					ReadHeaderTimeout: 10 * time.Second,
+					ReadTimeout:       60 * time.Second,
+					WriteTimeout:      120 * time.Second,
+					IdleTimeout:       120 * time.Second,
+				}
+				standaloneSrvPtr.Store(sl)
+				go func() {
+					logger.Info("standalone http listener starting", "addr", addr)
+					if err := sl.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+						logger.Error("standalone http listener failed", "addr", addr, "err", err)
+					}
+				}()
+			})
+			if !started {
+				if prev, _ := standaloneAddr.Load().(string); prev != addr {
+					logger.Warn("standalone_http_listen changed; restart the plugin to apply",
+						"current", prev, "requested", addr)
+				}
+			}
+		}
+
 		storePtr.Store(st)
 		if cache != nil {
 			cachePtr.Store(cache)
@@ -135,6 +188,26 @@ func main() {
 		logger.Info("configured", "target_backend", bcfg.TargetBackendPluginID, "streaming_mode", bcfg.StreamingMode)
 		return nil
 	})
+
+	// Graceful shutdown for the standalone HTTP listener (if it bound a port
+	// during Configure). On SIGTERM/SIGINT we call Shutdown(ctx) with a 10s
+	// drain window so in-flight client-app requests (ABS streams especially)
+	// finish instead of being killed mid-byte by process exit. signal.Notify
+	// fanning to multiple subscribers is documented and safe; the SDK
+	// runtime's own signal handler keeps running independently.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		if sl := standaloneSrvPtr.Load(); sl != nil {
+			logger.Info("draining standalone http listener", "addr", sl.Addr)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := sl.Shutdown(ctx); err != nil {
+				logger.Warn("standalone http drain returned error", "err", err)
+			}
+		}
+	}()
 
 	// Status watcher (event consumer).
 	cons := consumer.New(func() *consumer.Deps {

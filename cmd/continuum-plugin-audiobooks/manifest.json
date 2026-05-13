@@ -51,6 +51,39 @@
           {"key": "value", "label": "Connection URL", "control": "ADMIN_FORM_CONTROL_PASSWORD", "required": true, "secret": true}
         ]
       }
+    },
+    {
+      "key": "standalone_http_listen",
+      "title": "Standalone HTTP listen address",
+      "description": "Optional. When set (e.g. ':7878' or '127.0.0.1:7878'), the plugin serves its HTTP routes directly on this address so operators can reverse-proxy a hostname (e.g. abs.example.com) to it. Protected SPA routes still require a Continuum session and will 401 here; public client-app routes (ABS API, /ping, /login) work normally. Changing this value requires a plugin restart. Leave empty to disable.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}",
+      "admin_form": {
+        "fields": [
+          {"key": "value", "label": "Listen address", "control": "ADMIN_FORM_CONTROL_TEXT"}
+        ]
+      }
+    },
+    {
+      "key": "cdn_hostname",
+      "title": "Audiobooks CDN hostname",
+      "description": "Optional. When set together with cdn_signing_secret, the portal emits presigned-URL track URLs pointing at this hostname (e.g. 'audiobooks-cdn.example.com'). The hostname must reverse-proxy to the audiobooksdb plugin's standalone HTTP listener. Leave both unset to keep the current proxy-through-portal behavior.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}",
+      "admin_form": {
+        "fields": [
+          {"key": "value", "label": "CDN hostname", "control": "ADMIN_FORM_CONTROL_TEXT"}
+        ]
+      }
+    },
+    {
+      "key": "cdn_signing_secret",
+      "title": "Audiobooks CDN signing secret",
+      "description": "32-byte base64-encoded HMAC secret shared with the audiobooksdb plugin's stream_signing_secret. The same value goes in both plugins. Click 'Generate' in the admin UI to create a new one. The portal stores this in plain form (it needs the plaintext to sign JWTs); rotate by regenerating and updating both plugins.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}",
+      "admin_form": {
+        "fields": [
+          {"key": "value", "label": "Base64 secret", "control": "ADMIN_FORM_CONTROL_PASSWORD", "secret": true}
+        ]
+      }
     }
   ]
 }

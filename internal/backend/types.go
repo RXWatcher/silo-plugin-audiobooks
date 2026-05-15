@@ -3,6 +3,21 @@
 // forwarded.
 package backend
 
+// AuthorRef carries a stable ID + display name for an author. IDs are
+// supplied by the backend (the audiobook_backend.v1 contract); when the
+// upstream lacks IDs, the backend derives them as slugs from the name.
+type AuthorRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// SeriesRef is the same idea for series; sequence may be empty.
+type SeriesRef struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Sequence string `json:"sequence,omitempty"`
+}
+
 // AudiobookSummary mirrors the backend's contract.
 type AudiobookSummary struct {
 	ID              string   `json:"id"`
@@ -14,6 +29,14 @@ type AudiobookSummary struct {
 	HasCover        bool     `json:"has_cover"`
 	Year            int      `json:"year,omitempty"`
 	Rating          float64  `json:"rating,omitempty"`
+	// Reference-shaped fields supplied by the v1.1 contract. When the
+	// upstream is older these will be empty and ToLibrary*** falls back to
+	// deriving them from the legacy Authors/Series strings.
+	AuthorRefs  []AuthorRef `json:"author_refs,omitempty"`
+	SeriesRefs  []SeriesRef `json:"series_refs,omitempty"`
+	CoverPath   string      `json:"cover_path,omitempty"`
+	AddedAtMs   int64       `json:"added_at_ms,omitempty"`
+	UpdatedAtMs int64       `json:"updated_at_ms,omitempty"`
 }
 
 // AudiobookFile describes one streamable file in an audiobook.

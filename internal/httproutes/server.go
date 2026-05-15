@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 
 	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
@@ -31,6 +32,35 @@ func (s *Server) SetHandler(h http.Handler) {
 		return
 	}
 	s.handler.Store(&h)
+}
+
+// ServeHTTP exposes the active handler to a standalone HTTP listener so
+// operators can reverse-proxy a hostname (e.g. abs.example.com) directly to
+// this plugin's public routes. Before SetHandler has been called, returns 503
+// in the same shape as Handle.
+//
+// SECURITY: strips inbound X-Continuum-* headers before invoking the handler.
+// These headers are the host plane's trust channel (X-Continuum-User-Id,
+// X-Continuum-User-Role, etc. — injected by the host's plugin proxy after
+// session validation). A client connecting directly to the standalone port
+// must never be able to forge them, otherwise auth checks inside handlers
+// would accept attacker-supplied identity. Stripping them puts the request
+// in the same shape as an anonymous, public-route request; any handler that
+// requires authenticated identity will naturally 401.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	hPtr := s.handler.Load()
+	if hPtr == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"not_ready","message":"plugin not configured"}}`))
+		return
+	}
+	for k := range r.Header {
+		if strings.HasPrefix(strings.ToLower(k), "x-continuum-") {
+			r.Header.Del(k)
+		}
+	}
+	(*hPtr).ServeHTTP(w, r)
 }
 
 // Handle is the gRPC entrypoint; replays the request against the wrapped

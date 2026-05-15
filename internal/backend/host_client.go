@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+// maxResponseBytes caps response bodies read from upstream plugin backends
+// via the host's plugin proxy. Backend JSON responses are well under this
+// in normal operation; the cap defends against memory exhaustion if an
+// upstream returns a runaway body.
+const maxResponseBytes = 10 << 20 // 10 MiB
+
 // HostClient issues HTTP requests to other plugins via the continuum host's
 // plugin proxy. The portal uses one HostClient per installed backend. The
 // bearer token is provided per-request from the caller (typically the user
@@ -78,7 +84,10 @@ func (c *HostClient) do(ctx context.Context, method, bearer, installID, pathAndQ
 		return nil, fmt.Errorf("do: %w", err)
 	}
 	defer resp.Body.Close()
-	out, _ := io.ReadAll(resp.Body)
+	out, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("backend %d: %s", resp.StatusCode, string(out))
 	}

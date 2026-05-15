@@ -1,47 +1,73 @@
 package abs
 
-import "github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
+import (
+	"strconv"
+	"strings"
+	"unicode"
+
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
+)
 
 // VirtualLibraryID is the single library exposed to ABS clients.
 const (
-	VirtualLibraryID = "continuum-audiobooks"
+	VirtualLibraryID   = "continuum-audiobooks"
 	VirtualLibraryName = "Audiobooks"
-	VirtualFolderID  = "main"
-	LibraryMediaType = "book"
-	ServerVersion    = "2.25.1"
-	ServerSourceTag  = "continuum"
+	VirtualFolderID    = "main"
+	LibraryMediaType   = "book"
+	ServerVersion      = "2.25.1"
+	ServerSourceTag    = "continuum"
 )
 
-// LibraryItem is the ABS-shaped audiobook summary.
+// AuthorObj is the ABS-shaped author reference. ABS clients filter by id;
+// some screens render only name.
+type AuthorObj struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// SeriesObj is the ABS-shaped series reference; sequence is the per-book
+// position string (e.g. "1", "1.5").
+type SeriesObj struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Sequence string `json:"sequence,omitempty"`
+}
+
+// LibraryItem is the ABS-shaped audiobook summary. AddedAt / UpdatedAt are
+// Unix milliseconds; some shelves on the home screen sort by these and
+// clients also expect them as ints (not strings).
 type LibraryItem struct {
-	ID          string         `json:"id"`
-	LibraryID   string         `json:"libraryId"`
-	FolderID    string         `json:"folderId"`
-	MediaType   string         `json:"mediaType"`
-	Media       LibraryItemMedia `json:"media"`
-	NumTracks   int            `json:"numTracks,omitempty"`
+	ID        string           `json:"id"`
+	LibraryID string           `json:"libraryId"`
+	FolderID  string           `json:"folderId"`
+	MediaType string           `json:"mediaType"`
+	Media     LibraryItemMedia `json:"media"`
+	NumTracks int              `json:"numTracks,omitempty"`
+	AddedAt   int64            `json:"addedAt"`
+	UpdatedAt int64            `json:"updatedAt"`
 }
 
 // LibraryItemMedia carries the bulk of the metadata.
 type LibraryItemMedia struct {
-	Metadata Metadata     `json:"metadata"`
-	Duration float64      `json:"duration"`
-	CoverPath string      `json:"coverPath,omitempty"`
-	Tracks   []AudioTrack `json:"audioFiles,omitempty"`
-	Chapters []ChapterABS `json:"chapters,omitempty"`
+	Metadata  Metadata     `json:"metadata"`
+	Duration  float64      `json:"duration"`
+	CoverPath string       `json:"coverPath"`
+	Tracks    []AudioTrack `json:"audioFiles,omitempty"`
+	Chapters  []ChapterABS `json:"chapters,omitempty"`
 }
 
-// Metadata is the book-level metadata block.
+// Metadata is the book-level metadata block. Authors / Narrators / Series
+// match the ABS spec: arrays of references (or strings for Narrators).
 type Metadata struct {
-	Title       string   `json:"title"`
-	AuthorName  string   `json:"authorName,omitempty"`
-	NarratorName string  `json:"narratorName,omitempty"`
-	Description string   `json:"description,omitempty"`
-	PublishedYear string `json:"publishedYear,omitempty"`
-	ISBN        string   `json:"isbn,omitempty"`
-	Publisher   string   `json:"publisher,omitempty"`
-	SeriesName  string   `json:"seriesName,omitempty"`
-	Genres      []string `json:"genres,omitempty"`
+	Title         string      `json:"title"`
+	Authors       []AuthorObj `json:"authors"`
+	Narrators     []string    `json:"narrators"`
+	Series        []SeriesObj `json:"series"`
+	Description   string      `json:"description,omitempty"`
+	PublishedYear string      `json:"publishedYear,omitempty"`
+	ISBN          string      `json:"isbn,omitempty"`
+	Publisher     string      `json:"publisher,omitempty"`
+	Genres        []string    `json:"genres,omitempty"`
 }
 
 // AudioTrack is a single playable file.
@@ -64,22 +90,21 @@ type ChapterABS struct {
 // ToLibraryItem translates a backend AudiobookDetail into an ABS LibraryItem.
 // contentURLFn returns the URL clients hit for each audio file.
 func ToLibraryItem(d backend.AudiobookDetail, contentURLFn func(int) string) LibraryItem {
-	meta := Metadata{
-		Title: d.Title,
-		Description: d.Description,
-		ISBN: d.ISBN,
-		Publisher: d.Publisher,
-		SeriesName: d.Series,
-		Genres: d.Genres,
-	}
-	if len(d.Authors) > 0 {
-		meta.AuthorName = joinSemicolon(d.Authors)
-	}
-	if len(d.Narrators) > 0 {
-		meta.NarratorName = joinSemicolon(d.Narrators)
-	}
-	if d.Year > 0 {
-		meta.PublishedYear = itoa(d.Year)
+	meta := buildMetadata(d.AudiobookSummary)
+	meta.Description = d.Description
+	meta.ISBN = d.ISBN
+	meta.Publisher = d.Publisher
+	meta.Genres = d.Genres
+
+	// If the backend provided no AuthorRefs but did provide a flat
+	// series string, derive the series ref from the detail. Same for
+	// authors above (done inside buildMetadata).
+	if len(meta.Series) == 0 && strings.TrimSpace(d.Series) != "" {
+		meta.Series = []SeriesObj{{
+			ID:       slugify(d.Series),
+			Name:     d.Series,
+			Sequence: formatSequence(d.SeriesIndex),
+		}}
 	}
 
 	tracks := make([]AudioTrack, len(d.Files))
@@ -108,70 +133,128 @@ func ToLibraryItem(d backend.AudiobookDetail, contentURLFn func(int) string) Lib
 		FolderID:  VirtualFolderID,
 		MediaType: LibraryMediaType,
 		Media: LibraryItemMedia{
-			Metadata: meta,
-			Duration: float64(d.DurationSeconds),
-			Tracks:   tracks,
-			Chapters: chapters,
+			Metadata:  meta,
+			Duration:  float64(d.DurationSeconds),
+			CoverPath: pickCoverPath(d.AudiobookSummary),
+			Tracks:    tracks,
+			Chapters:  chapters,
 		},
 		NumTracks: len(d.Files),
+		AddedAt:   d.AddedAtMs,
+		UpdatedAt: d.UpdatedAtMs,
 	}
 }
 
 // ToLibrarySummary translates a backend AudiobookSummary into a slim ABS
 // LibraryItem (no tracks/chapters).
 func ToLibrarySummary(s backend.AudiobookSummary) LibraryItem {
-	meta := Metadata{Title: s.Title}
-	if len(s.Authors) > 0 {
-		meta.AuthorName = joinSemicolon(s.Authors)
-	}
-	if len(s.Narrators) > 0 {
-		meta.NarratorName = joinSemicolon(s.Narrators)
-	}
-	if s.Year > 0 {
-		meta.PublishedYear = itoa(s.Year)
-	}
 	return LibraryItem{
 		ID:        s.ID,
 		LibraryID: VirtualLibraryID,
 		FolderID:  VirtualFolderID,
 		MediaType: LibraryMediaType,
 		Media: LibraryItemMedia{
-			Metadata: meta,
-			Duration: float64(s.DurationSeconds),
+			Metadata:  buildMetadata(s),
+			Duration:  float64(s.DurationSeconds),
+			CoverPath: pickCoverPath(s),
 		},
+		AddedAt:   s.AddedAtMs,
+		UpdatedAt: s.UpdatedAtMs,
 	}
 }
 
-func joinSemicolon(parts []string) string {
-	if len(parts) == 0 {
+// buildMetadata centralises the AuthorObj / SeriesObj construction. When the
+// backend exposes refs we use them as-is; otherwise we synthesise refs from
+// the legacy flat string fields by slugging the names.
+//
+// FALLBACK NOTE: synthesising IDs by slugging the name is a short-term
+// measure for older audiobook_backend.v1 servers that don't yet emit
+// author_refs/series_refs. Clients that round-trip these IDs through
+// /libraries/{id}/items?filter=authors.<base64-id> will work as long as the
+// /libraries/{id}/authors endpoint here returns IDs derived the same way.
+func buildMetadata(s backend.AudiobookSummary) Metadata {
+	m := Metadata{
+		Title:     s.Title,
+		Narrators: append([]string(nil), s.Narrators...),
+		Authors:   []AuthorObj{},
+		Series:    []SeriesObj{},
+	}
+	if m.Narrators == nil {
+		m.Narrators = []string{}
+	}
+	if s.Year > 0 {
+		m.PublishedYear = strconv.Itoa(s.Year)
+	}
+
+	switch {
+	case len(s.AuthorRefs) > 0:
+		m.Authors = make([]AuthorObj, len(s.AuthorRefs))
+		for i, a := range s.AuthorRefs {
+			m.Authors[i] = AuthorObj{ID: a.ID, Name: a.Name}
+		}
+	case len(s.Authors) > 0:
+		m.Authors = make([]AuthorObj, 0, len(s.Authors))
+		for _, name := range s.Authors {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			m.Authors = append(m.Authors, AuthorObj{ID: slugify(name), Name: name})
+		}
+	}
+
+	if len(s.SeriesRefs) > 0 {
+		m.Series = make([]SeriesObj, len(s.SeriesRefs))
+		for i, r := range s.SeriesRefs {
+			m.Series[i] = SeriesObj{ID: r.ID, Name: r.Name, Sequence: r.Sequence}
+		}
+	}
+	return m
+}
+
+// pickCoverPath prefers the explicit cover_path from the backend, falling
+// back to cover_url, then to a synthesised plugin-route path. ABS clients
+// only require a non-empty string here — they fetch the real bytes via
+// /api/items/{id}/cover.
+func pickCoverPath(s backend.AudiobookSummary) string {
+	if s.CoverPath != "" {
+		return s.CoverPath
+	}
+	if s.CoverURL != "" {
+		return s.CoverURL
+	}
+	return "/api/items/" + s.ID + "/cover"
+}
+
+// slugify produces a stable ID-from-name. Mirrors the bookwarehouse-audio
+// plugin's catalog.Slugify so derived IDs round-trip identically across
+// the contract boundary.
+func slugify(name string) string {
+	var b strings.Builder
+	prevDash := true
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(r)
+			prevDash = false
+		default:
+			if !prevDash && b.Len() > 0 {
+				b.WriteRune('-')
+				prevDash = true
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "-")
+}
+
+// formatSequence renders a series_index (float) as a short string, dropping
+// trailing zeros: 1.0 → "1", 1.5 → "1.5", 0 → "".
+func formatSequence(v float64) string {
+	if v == 0 {
 		return ""
 	}
-	out := parts[0]
-	for _, p := range parts[1:] {
-		out += "; " + p
+	if v == float64(int64(v)) {
+		return strconv.FormatInt(int64(v), 10)
 	}
-	return out
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	negative := false
-	if n < 0 {
-		negative = true
-		n = -n
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if negative {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }

@@ -213,8 +213,28 @@ func (c *Cache) Evict(ctx context.Context, target int64) (int, error) {
 	removed := 0
 	for _, e := range candidates {
 		full := filepath.Join(c.dir, e.RelativePath)
-		_ = os.Remove(full)
-		_ = c.st.DeleteFileCacheByKey(ctx, e.CacheKey)
+		// Order matters: remove the on-disk file first, then the DB row. If
+		// the file remove fails (EACCES, EBUSY, FS error) and is NOT ENOENT,
+		// skip the DB delete so the entry stays accountable on the next
+		// sweep instead of leaving an orphaned file with no DB tracking
+		// (which would slowly bloat the cache directory).
+		if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
+			// Leave the row in place; the next Evict pass will retry.
+			// Don't break the whole sweep over one stuck entry.
+			continue
+		}
+		if err := c.st.DeleteFileCacheByKey(ctx, e.CacheKey); err != nil {
+			// DB delete failed after we already removed the file. We
+			// can't undo the unlink, but reporting the bytes as freed
+			// means the next sweep won't try to delete it again. Logged
+			// at the caller's discretion.
+			total -= e.BytesOnDisk
+			removed++
+			if total <= target {
+				break
+			}
+			continue
+		}
 		total -= e.BytesOnDisk
 		removed++
 		if total <= target {

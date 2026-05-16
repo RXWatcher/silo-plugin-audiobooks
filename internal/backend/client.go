@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -58,14 +57,10 @@ func (p ListParams) toQuery() string {
 // ListLibraries calls GET /api/v1/catalog/libraries on backends that expose
 // sub-library metadata. Older backends may 404; callers treat that as empty.
 func (c *Client) ListLibraries(ctx context.Context, bearer, installID string) ([]LibraryInfo, error) {
-	body, err := c.host.Get(ctx, bearer, installID, "/api/v1/catalog/libraries")
-	if err != nil {
-		return nil, err
-	}
 	var out struct {
 		Items []LibraryInfo `json:"items"`
 	}
-	if err := json.Unmarshal(body, &out); err != nil {
+	if err := c.host.GetJSON(ctx, bearer, installID, "/api/v1/catalog/libraries", &out); err != nil {
 		return nil, fmt.Errorf("decode libraries: %w", err)
 	}
 	return out.Items, nil
@@ -77,12 +72,8 @@ func (c *Client) ListCatalog(ctx context.Context, bearer, installID string, p Li
 	if p.Query != "" {
 		path = "/api/v1/catalog/search" + p.toQuery()
 	}
-	body, err := c.host.Get(ctx, bearer, installID, path)
-	if err != nil {
-		return PageEnvelope[AudiobookSummary]{}, err
-	}
 	var out PageEnvelope[AudiobookSummary]
-	if err := json.Unmarshal(body, &out); err != nil {
+	if err := c.host.GetJSON(ctx, bearer, installID, path, &out); err != nil {
 		return PageEnvelope[AudiobookSummary]{}, fmt.Errorf("decode catalog: %w", err)
 	}
 	return out, nil
@@ -90,12 +81,8 @@ func (c *Client) ListCatalog(ctx context.Context, bearer, installID string, p Li
 
 // GetDetail calls GET /api/v1/catalog/{id}.
 func (c *Client) GetDetail(ctx context.Context, bearer, installID, id string) (AudiobookDetail, error) {
-	body, err := c.host.Get(ctx, bearer, installID, "/api/v1/catalog/"+url.PathEscape(id))
-	if err != nil {
-		return AudiobookDetail{}, err
-	}
 	var out AudiobookDetail
-	if err := json.Unmarshal(body, &out); err != nil {
+	if err := c.host.GetJSON(ctx, bearer, installID, "/api/v1/catalog/"+url.PathEscape(id), &out); err != nil {
 		return AudiobookDetail{}, fmt.Errorf("decode detail: %w", err)
 	}
 	return out, nil
@@ -103,32 +90,29 @@ func (c *Client) GetDetail(ctx context.Context, bearer, installID, id string) (A
 
 // BrowseAuthors calls GET /api/v1/browse/authors.
 func (c *Client) BrowseAuthors(ctx context.Context, bearer, installID string, p ListParams) (PageEnvelope[AuthorSummary], error) {
-	body, err := c.host.Get(ctx, bearer, installID, "/api/v1/browse/authors"+p.toQuery())
-	if err != nil {
+	var out PageEnvelope[AuthorSummary]
+	if err := c.host.GetJSON(ctx, bearer, installID, "/api/v1/browse/authors"+p.toQuery(), &out); err != nil {
 		return PageEnvelope[AuthorSummary]{}, err
 	}
-	var out PageEnvelope[AuthorSummary]
-	return out, json.Unmarshal(body, &out)
+	return out, nil
 }
 
 // BrowseSeries calls GET /api/v1/browse/series.
 func (c *Client) BrowseSeries(ctx context.Context, bearer, installID string, p ListParams) (PageEnvelope[SeriesSummary], error) {
-	body, err := c.host.Get(ctx, bearer, installID, "/api/v1/browse/series"+p.toQuery())
-	if err != nil {
+	var out PageEnvelope[SeriesSummary]
+	if err := c.host.GetJSON(ctx, bearer, installID, "/api/v1/browse/series"+p.toQuery(), &out); err != nil {
 		return PageEnvelope[SeriesSummary]{}, err
 	}
-	var out PageEnvelope[SeriesSummary]
-	return out, json.Unmarshal(body, &out)
+	return out, nil
 }
 
 // BrowseNarrators calls GET /api/v1/browse/narrators.
 func (c *Client) BrowseNarrators(ctx context.Context, bearer, installID string, p ListParams) (PageEnvelope[NarratorSummary], error) {
-	body, err := c.host.Get(ctx, bearer, installID, "/api/v1/browse/narrators"+p.toQuery())
-	if err != nil {
+	var out PageEnvelope[NarratorSummary]
+	if err := c.host.GetJSON(ctx, bearer, installID, "/api/v1/browse/narrators"+p.toQuery(), &out); err != nil {
 		return PageEnvelope[NarratorSummary]{}, err
 	}
-	var out PageEnvelope[NarratorSummary]
-	return out, json.Unmarshal(body, &out)
+	return out, nil
 }
 
 // CoverURL returns the URL clients hit for a book cover. The portal can
@@ -147,12 +131,8 @@ func (c *Client) StreamURL(installID, bookID string, fileIdx int) string {
 
 // GetRequestSnapshot calls GET /api/v1/requests/{external_id}.
 func (c *Client) GetRequestSnapshot(ctx context.Context, bearer, installID, externalID string) (RequestSnapshot, error) {
-	body, err := c.host.Get(ctx, bearer, installID, "/api/v1/requests/"+url.PathEscape(externalID))
-	if err != nil {
-		return RequestSnapshot{}, err
-	}
 	var out RequestSnapshot
-	if err := json.Unmarshal(body, &out); err != nil {
+	if err := c.host.GetJSON(ctx, bearer, installID, "/api/v1/requests/"+url.PathEscape(externalID), &out); err != nil {
 		return RequestSnapshot{}, fmt.Errorf("decode snapshot: %w", err)
 	}
 	return out, nil

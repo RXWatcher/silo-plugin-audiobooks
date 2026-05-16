@@ -3,6 +3,8 @@ package backend
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -58,6 +60,42 @@ func (c *HostClient) pluginURL(installID, pathAndQuery string) string {
 // passed in the Authorization header (empty token sends no Authorization).
 func (c *HostClient) Get(ctx context.Context, bearerToken, installID, pathAndQuery string) ([]byte, error) {
 	return c.do(ctx, "GET", bearerToken, installID, pathAndQuery, nil)
+}
+
+// GetJSON issues a GET and decodes the JSON response. When the SDK
+// RuntimeHost is available this uses its typed JSON helper; otherwise it
+// falls back to the host HTTP proxy path.
+func (c *HostClient) GetJSON(ctx context.Context, bearerToken, installID, pathAndQuery string, out any) error {
+	if c.runtimeHost != nil {
+		if id, err := strconv.Atoi(installID); err == nil && id > 0 {
+			path, query := splitPluginPath(pathAndQuery)
+			headers := map[string]string{}
+			if bearerToken != "" {
+				headers["Authorization"] = "Bearer " + bearerToken
+			}
+			err := c.runtimeHost.CallPluginJSON(ctx, runtimehost.CallPluginJSONRequest{
+				InstallationID:   id,
+				Path:             path,
+				Headers:          headers,
+				Query:            query,
+				Response:         out,
+				MaxResponseBytes: maxResponseBytes,
+			})
+			var statusErr *runtimehost.HTTPStatusError
+			if errors.As(err, &statusErr) {
+				return fmt.Errorf("backend %d: %s", statusErr.StatusCode, string(statusErr.Body))
+			}
+			return err
+		}
+	}
+	body, err := c.Get(ctx, bearerToken, installID, pathAndQuery)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	return nil
 }
 
 // PostJSON issues a POST with a JSON body.

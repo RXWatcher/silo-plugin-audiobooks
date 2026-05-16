@@ -53,6 +53,10 @@ func (h *Handler) HandleEvent(ctx context.Context, req *pluginv1.HandleEventRequ
 	switch leaf {
 	case "request_acknowledged":
 		h.handleAcknowledged(ctx, d, p)
+	case "request_status_changed":
+		h.handleStatusChanged(ctx, d, p)
+	case "request_fulfilled":
+		h.handleFulfilled(ctx, d, p)
 	case "request_failed":
 		h.handleFailed(ctx, d, p)
 	case "audiobook_imported":
@@ -66,7 +70,7 @@ func (h *Handler) HandleEvent(ctx context.Context, req *pluginv1.HandleEventRequ
 }
 
 func (h *Handler) handleAcknowledged(ctx context.Context, d *Deps, p map[string]any) {
-	reqID, _ := p["request_id"].(string)
+	reqID := requestIDFromPayload(p)
 	externalID, _ := p["external_id"].(string)
 	if reqID == "" || externalID == "" {
 		return
@@ -76,8 +80,35 @@ func (h *Handler) handleAcknowledged(ctx context.Context, d *Deps, p map[string]
 	}
 }
 
+func (h *Handler) handleStatusChanged(ctx context.Context, d *Deps, p map[string]any) {
+	reqID := requestIDFromPayload(p)
+	status, _ := p["status"].(string)
+	if reqID == "" || status == "" {
+		return
+	}
+	if err := d.Store.UpdateRequestStatus(ctx, reqID, status, "", ""); err != nil {
+		h.logger.Warn("update status changed", "err", err, "request_id", reqID)
+	}
+}
+
+func (h *Handler) handleFulfilled(ctx context.Context, d *Deps, p map[string]any) {
+	reqID := requestIDFromPayload(p)
+	externalID, _ := p["external_id"].(string)
+	if externalID != "" {
+		if err := d.Store.MarkRequestFulfilled(ctx, externalID); err == nil {
+			return
+		}
+	}
+	if reqID == "" {
+		return
+	}
+	if err := d.Store.UpdateRequestStatus(ctx, reqID, "fulfilled", "", ""); err != nil {
+		h.logger.Warn("update fulfilled", "err", err, "request_id", reqID)
+	}
+}
+
 func (h *Handler) handleFailed(ctx context.Context, d *Deps, p map[string]any) {
-	reqID, _ := p["request_id"].(string)
+	reqID := requestIDFromPayload(p)
 	reason, _ := p["reason"].(string)
 	if reqID == "" {
 		// Try matching by external_id for audiobook_failed events.
@@ -112,4 +143,12 @@ func lastSegment(name string) string {
 		return name[i+1:]
 	}
 	return name
+}
+
+func requestIDFromPayload(p map[string]any) string {
+	if id, _ := p["request_id"].(string); id != "" {
+		return id
+	}
+	id, _ := p["requestId"].(string)
+	return id
 }

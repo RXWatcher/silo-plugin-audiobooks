@@ -95,6 +95,12 @@ cover, and streaming behavior. For local M4B/MP3 libraries, use
 The portal listens for backend state changes and also runs periodic
 reconciliation so missed events do not permanently strand requests.
 
+Backend plugins are optional peers, not startup dependencies. If no audiobook
+backend is installed or the configured request provider is unavailable, the
+portal still starts; catalog/request routes report the missing provider only
+when that provider is needed. Notification delivery is likewise passive when
+`continuum.notifications` is installed and absent otherwise.
+
 ## Standalone And CDN Modes
 
 `standalone_http_listen` lets the plugin bind a direct TCP listener such as

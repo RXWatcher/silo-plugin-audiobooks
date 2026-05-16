@@ -44,17 +44,17 @@ func (s *Server) handleGetBackendConfig(w http.ResponseWriter, r *http.Request) 
 	cfg.ABSJWTSecret = nil
 	libs, _ := s.d.Store.ListPortalLibraries(r.Context(), false)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"target_backend_plugin_id":   cfg.TargetBackendPluginID,
+		"target_backend_plugin_id":       cfg.TargetBackendPluginID,
 		"target_backend_installation_id": cfg.TargetBackendInstallID,
-		"auto_approve_requests":      cfg.AutoApproveRequests,
-		"streaming_mode":             cfg.StreamingMode,
-		"cache_dir":                  cfg.CacheDir,
-		"cache_max_size_gb":          cfg.CacheMaxSizeGB,
-		"cache_download_concurrency": cfg.CacheDownloadConcurrency,
-		"path_remappings":            cfg.PathRemappings,
-		"abs_access_token_ttl_hours": cfg.ABSAccessTTLHours,
-		"abs_refresh_token_ttl_days": cfg.ABSRefreshTTLDays,
-		"libraries":                  libs,
+		"auto_approve_requests":          cfg.AutoApproveRequests,
+		"streaming_mode":                 cfg.StreamingMode,
+		"cache_dir":                      cfg.CacheDir,
+		"cache_max_size_gb":              cfg.CacheMaxSizeGB,
+		"cache_download_concurrency":     cfg.CacheDownloadConcurrency,
+		"path_remappings":                cfg.PathRemappings,
+		"abs_access_token_ttl_hours":     cfg.ABSAccessTTLHours,
+		"abs_refresh_token_ttl_days":     cfg.ABSRefreshTTLDays,
+		"libraries":                      libs,
 	})
 }
 
@@ -220,12 +220,14 @@ func (s *Server) handleAdminApproveRequest(w http.ResponseWriter, r *http.Reques
 	}
 	if s.d.Events != nil && req.TargetPluginID != "" {
 		s.d.Events.Publish(r.Context(), "request_submitted", map[string]any{
-			"request_id":        reqID,
-			"target_plugin_id":  req.TargetPluginID,
-			"title":             req.Title,
-			"author":            req.Author,
-			"isbn":              req.ISBN,
-			"requester_user_id": req.UserID,
+			"request_id":                reqID,
+			"requestId":                 reqID,
+			"target_plugin_id":          req.TargetPluginID,
+			"target_provider_plugin_id": req.TargetPluginID,
+			"title":                     req.Title,
+			"author":                    req.Author,
+			"isbn":                      req.ISBN,
+			"requester_user_id":         req.UserID,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

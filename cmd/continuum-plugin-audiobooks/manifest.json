@@ -17,6 +17,8 @@
       "description": "Tracks request fulfillment and import status from configured audiobook backends.",
       "subscriptions": [
         "plugin.continuum.bookwarehouse-audio.request_acknowledged",
+        "plugin.continuum.bookwarehouse-audio.request_status_changed",
+        "plugin.continuum.bookwarehouse-audio.request_fulfilled",
         "plugin.continuum.bookwarehouse-audio.request_failed",
         "plugin.continuum.bookwarehouse-audio.audiobook_imported",
         "plugin.continuum.bookwarehouse-audio.audiobook_failed"

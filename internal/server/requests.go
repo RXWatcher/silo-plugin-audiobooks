@@ -77,12 +77,14 @@ func (s *Server) handleCreateMyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if status == "submitted" && s.d.Events != nil {
 		s.d.Events.Publish(r.Context(), "request_submitted", map[string]any{
-			"request_id":        reqID,
-			"target_plugin_id":  targetPluginID,
-			"title":             p.Title,
-			"author":            p.Author,
-			"isbn":              p.ISBN,
-			"requester_user_id": id.UserID,
+			"request_id":                reqID,
+			"requestId":                 reqID,
+			"target_plugin_id":          targetPluginID,
+			"target_provider_plugin_id": targetPluginID,
+			"title":                     p.Title,
+			"author":                    p.Author,
+			"isbn":                      p.ISBN,
+			"requester_user_id":         id.UserID,
 		})
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{

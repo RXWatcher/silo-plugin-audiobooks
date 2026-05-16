@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/runtimehost"
 )
 
 // maxResponseBytes caps response bodies read from upstream plugin backends
@@ -21,8 +25,9 @@ const maxResponseBytes = 10 << 20 // 10 MiB
 // bearer token is provided per-request from the caller (typically the user
 // header forwarded from the inbound request).
 type HostClient struct {
-	base string
-	hc   *http.Client
+	base        string
+	hc          *http.Client
+	runtimeHost *runtimehost.Client
 }
 
 // NewHostClient builds a HostClient bound to the host base URL (e.g.
@@ -32,6 +37,11 @@ func NewHostClient(hostBaseURL string) *HostClient {
 		base: strings.TrimRight(hostBaseURL, "/"),
 		hc:   &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+func (c *HostClient) WithRuntimeHost(host *runtimehost.Client) *HostClient {
+	c.runtimeHost = host
+	return c
 }
 
 // pluginURL builds the host proxy URL.
@@ -63,6 +73,36 @@ func (c *HostClient) PluginURL(installID, pathAndQuery string) string {
 }
 
 func (c *HostClient) do(ctx context.Context, method, bearer, installID, pathAndQuery string, body []byte) ([]byte, error) {
+	if c.runtimeHost != nil {
+		if id, err := strconv.Atoi(installID); err == nil && id > 0 {
+			path, query := splitPluginPath(pathAndQuery)
+			headers := map[string]string{"Accept": "application/json"}
+			if bearer != "" {
+				headers["Authorization"] = "Bearer " + bearer
+			}
+			if body != nil {
+				headers["Content-Type"] = "application/json"
+			}
+			resp, err := c.runtimeHost.CallPluginHTTP(ctx, runtimehost.CallPluginHTTPRequest{
+				InstallationID: id,
+				Method:         method,
+				Path:           path,
+				Headers:        headers,
+				Body:           body,
+				Query:          query,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if resp.StatusCode >= 400 {
+				return nil, fmt.Errorf("backend %d: %s", resp.StatusCode, string(resp.Body))
+			}
+			if len(resp.Body) > maxResponseBytes {
+				return nil, fmt.Errorf("response exceeds %d bytes", maxResponseBytes)
+			}
+			return resp.Body, nil
+		}
+	}
 	url := c.pluginURL(installID, pathAndQuery)
 	var rdr io.Reader
 	if body != nil {
@@ -92,4 +132,24 @@ func (c *HostClient) do(ctx context.Context, method, bearer, installID, pathAndQ
 		return nil, fmt.Errorf("backend %d: %s", resp.StatusCode, string(out))
 	}
 	return out, nil
+}
+
+func splitPluginPath(pathAndQuery string) (string, map[string]any) {
+	u, err := url.Parse(pathAndQuery)
+	if err != nil || u.RawQuery == "" {
+		return pathAndQuery, nil
+	}
+	query := make(map[string]any)
+	for key, values := range u.Query() {
+		if len(values) == 1 {
+			query[key] = values[0]
+			continue
+		}
+		items := make([]any, 0, len(values))
+		for _, value := range values {
+			items = append(items, value)
+		}
+		query[key] = items
+	}
+	return u.Path, query
 }

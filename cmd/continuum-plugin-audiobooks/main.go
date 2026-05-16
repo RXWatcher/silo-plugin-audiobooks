@@ -55,12 +55,12 @@ func main() {
 	httpSrv := httproutes.NewServer()
 
 	var (
-		poolPtr           atomic.Pointer[pgxpool.Pool]
-		storePtr          atomic.Pointer[store.Store]
-		cachePtr          atomic.Pointer[streaming.Cache]
-		standaloneOnce    sync.Once
-		standaloneAddr    atomic.Value          // string; tracks the bound addr so reconfigures can warn on change
-		standaloneSrvPtr  atomic.Pointer[http.Server]
+		poolPtr          atomic.Pointer[pgxpool.Pool]
+		storePtr         atomic.Pointer[store.Store]
+		cachePtr         atomic.Pointer[streaming.Cache]
+		standaloneOnce   sync.Once
+		standaloneAddr   atomic.Value // string; tracks the bound addr so reconfigures can warn on change
+		standaloneSrvPtr atomic.Pointer[http.Server]
 	)
 
 	// Host base URL used to build self-referential public stream URLs in
@@ -70,7 +70,7 @@ func main() {
 	if hostBase == "" {
 		hostBase = "http://localhost:8080"
 	}
-	bkClient := backend.NewClient(backend.NewHostClient(hostBase))
+	bkClient := backend.NewClient(backend.NewHostClient(hostBase).WithRuntimeHost(sdkruntime.Host()))
 
 	rt := pluginrt.New(manifest, func(cfg pluginrt.Config) error {
 		ctx := context.Background()

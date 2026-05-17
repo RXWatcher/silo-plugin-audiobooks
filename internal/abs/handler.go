@@ -407,11 +407,34 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	refreshTTL := time.Duration(cfg.ABSRefreshTTLDays) * 24 * time.Hour
 	newAccessJTI := ulid.Make().String()
 	newRefreshJTI := ulid.Make().String()
-	access, _ := IssueAccessToken(cfg.ABSJWTSecret, claims.UserID, newAccessJTI, accessTTL)
-	refresh, _ := IssueRefreshToken(cfg.ABSJWTSecret, claims.UserID, newRefreshJTI, refreshTTL)
-	_ = h.store.InsertABSToken(r.Context(), store.ABSToken{ID: newAccessJTI, UserID: claims.UserID, JTI: newAccessJTI, ExpiresAt: time.Now().Add(accessTTL)})
-	_ = h.store.InsertABSToken(r.Context(), store.ABSToken{ID: newRefreshJTI, UserID: claims.UserID, JTI: newRefreshJTI, ExpiresAt: time.Now().Add(refreshTTL)})
-	_ = h.store.RevokeABSTokenByJTI(r.Context(), claims.JTI)
+	access, err := IssueAccessToken(cfg.ABSJWTSecret, claims.UserID, newAccessJTI, accessTTL)
+	if err != nil {
+		http.Error(w, "token mint failed", http.StatusInternalServerError)
+		return
+	}
+	refresh, err := IssueRefreshToken(cfg.ABSJWTSecret, claims.UserID, newRefreshJTI, refreshTTL)
+	if err != nil {
+		http.Error(w, "token mint failed", http.StatusInternalServerError)
+		return
+	}
+	// Persist the new tokens and revoke the old refresh jti. If the revoke
+	// does NOT persist, the old refresh token stays valid — handing out a
+	// new pair anyway would create a refresh-token replay window. Fail the
+	// rotation instead; the client keeps using its still-valid old token and
+	// can retry. (Inserts are checked too: an unpersisted jti would be
+	// treated as revoked on next use and silently log the user out.)
+	if err := h.store.InsertABSToken(r.Context(), store.ABSToken{ID: newAccessJTI, UserID: claims.UserID, JTI: newAccessJTI, ExpiresAt: time.Now().Add(accessTTL)}); err != nil {
+		http.Error(w, "token persist failed", http.StatusInternalServerError)
+		return
+	}
+	if err := h.store.InsertABSToken(r.Context(), store.ABSToken{ID: newRefreshJTI, UserID: claims.UserID, JTI: newRefreshJTI, ExpiresAt: time.Now().Add(refreshTTL)}); err != nil {
+		http.Error(w, "token persist failed", http.StatusInternalServerError)
+		return
+	}
+	if err := h.store.RevokeABSTokenByJTI(r.Context(), claims.JTI); err != nil {
+		http.Error(w, "token rotation failed", http.StatusInternalServerError)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accessToken":  access,
 		"refreshToken": refresh,
@@ -723,11 +746,11 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Mirror to progress (sess.BookID is now verified to belong to a.UserID).
-	_ = h.store.UpsertProgress(r.Context(), store.Progress{
-		UserID: a.UserID, BookID: sess.BookID,
-		CurrentSeconds: int(p.CurrentTime),
-	})
+	// Mirror only the position (sess.BookID is verified to belong to
+	// a.UserID). Must NOT use UpsertProgress here: it would write
+	// is_finished=false / progress_pct=0 every sync tick and silently
+	// un-finish a book the user explicitly marked finished.
+	_ = h.store.UpdateProgressPosition(r.Context(), a.UserID, sess.BookID, int(p.CurrentTime))
 
 	resp := map[string]any{"ok": true}
 

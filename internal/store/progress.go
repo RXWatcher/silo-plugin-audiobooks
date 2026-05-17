@@ -19,6 +19,28 @@ type Progress struct {
 	UpdatedAt      time.Time
 }
 
+// UpdateProgressPosition records only the playback position for a
+// (user_id, book_id). Unlike UpsertProgress it does NOT touch is_finished or
+// progress_pct, so a periodic playback-position sync can't silently un-finish
+// a book the user explicitly marked finished (or reset its percent). On a
+// brand-new row it inserts an in-progress record (is_finished defaults false).
+func (s *Store) UpdateProgressPosition(ctx context.Context, userID, bookID string, currentSeconds int) error {
+	if userID == "" || bookID == "" {
+		return fmt.Errorf("user_id and book_id required")
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO progress (user_id, book_id, current_seconds, progress_pct, is_finished, updated_at)
+		VALUES ($1, $2, $3, 0, FALSE, now())
+		ON CONFLICT (user_id, book_id) DO UPDATE SET
+			current_seconds = EXCLUDED.current_seconds,
+			updated_at      = now()
+	`, userID, bookID, currentSeconds)
+	if err != nil {
+		return fmt.Errorf("update progress position: %w", err)
+	}
+	return nil
+}
+
 // UpsertProgress inserts or updates a (user_id, book_id) row.
 func (s *Store) UpsertProgress(ctx context.Context, p Progress) error {
 	if p.UserID == "" || p.BookID == "" {

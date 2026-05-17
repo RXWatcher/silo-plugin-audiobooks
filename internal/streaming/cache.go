@@ -40,8 +40,8 @@ func (c *Cache) MaxBytes() int64 { return c.maxBytes }
 
 // CacheEntry is an open file plus metadata for an HTTP response.
 type CacheEntry struct {
-	File    *os.File
-	Path    string
+	File     *os.File
+	Path     string
 	MimeType string
 	Size     int64
 	ModTime  time.Time
@@ -129,8 +129,8 @@ func (c *Cache) lookup(ctx context.Context, key string) (*CacheEntry, bool, erro
 		return nil, false, err
 	}
 	return &CacheEntry{
-		File:    f,
-		Path:    full,
+		File:     f,
+		Path:     full,
 		MimeType: rec.MimeType,
 		Size:     info.Size(),
 		ModTime:  info.ModTime(),
@@ -179,6 +179,7 @@ func (c *Cache) download(ctx context.Context, key string, fetch Fetcher) error {
 		return fmt.Errorf("io.Copy: %w", err)
 	}
 	if err := os.Rename(tmp, full); err != nil {
+		_ = os.Remove(tmp) // don't leak the .part file; retries write a fresh one
 		_ = c.st.UpdateFileCacheStatus(ctx, key, "failed", 0, err.Error())
 		return fmt.Errorf("rename: %w", err)
 	}

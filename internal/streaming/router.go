@@ -107,7 +107,11 @@ func (r *Router) serveCache(w http.ResponseWriter, req *http.Request, bearer, in
 		return io.NopCloser(strings.NewReader(string(resp))), "audio/mpeg", int64(len(resp)), nil
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		// The host plugin-proxy client is buffered and capped at 10 MiB, so
+		// caching real audiobook files (tens of MB to GBs) always fails
+		// here. Rather than 502 the playback, degrade to proxy mode (a 302
+		// to the backend stream) which streams correctly without buffering.
+		r.serveProxy(w, req, bearer, installID, bookID, fileIdx)
 		return
 	}
 	defer entry.Close()

@@ -22,6 +22,17 @@ import (
 // upstream returns a runaway body.
 const maxResponseBytes = 10 << 20 // 10 MiB
 
+// errBodySnippet caps how much of an upstream error body is inlined into an
+// error string (errors propagate to logs and HTTP responses).
+const errBodySnippet = 512
+
+func truncForError(b []byte) string {
+	if len(b) <= errBodySnippet {
+		return string(b)
+	}
+	return string(b[:errBodySnippet]) + "…(truncated)"
+}
+
 // HostClient issues HTTP requests to other plugins via the continuum host's
 // plugin proxy. The portal uses one HostClient per installed backend. The
 // bearer token is provided per-request from the caller (typically the user
@@ -53,7 +64,7 @@ func (c *HostClient) pluginURL(installID, pathAndQuery string) string {
 	if !strings.HasPrefix(pathAndQuery, "/") {
 		pathAndQuery = "/" + pathAndQuery
 	}
-	return fmt.Sprintf("%s/api/v1/plugins/%s%s", c.base, installID, pathAndQuery)
+	return fmt.Sprintf("%s/api/v1/plugins/%s%s", c.base, url.PathEscape(installID), pathAndQuery)
 }
 
 // Get issues a GET against the named plugin's proxy path. bearerToken is
@@ -133,7 +144,7 @@ func (c *HostClient) do(ctx context.Context, method, bearer, installID, pathAndQ
 				return nil, err
 			}
 			if resp.StatusCode >= 400 {
-				return nil, fmt.Errorf("backend %d: %s", resp.StatusCode, string(resp.Body))
+				return nil, fmt.Errorf("backend %d: %s", resp.StatusCode, truncForError(resp.Body))
 			}
 			if len(resp.Body) > maxResponseBytes {
 				return nil, fmt.Errorf("response exceeds %d bytes", maxResponseBytes)
@@ -167,7 +178,7 @@ func (c *HostClient) do(ctx context.Context, method, bearer, installID, pathAndQ
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("backend %d: %s", resp.StatusCode, string(out))
+		return nil, fmt.Errorf("backend %d: %s", resp.StatusCode, truncForError(out))
 	}
 	return out, nil
 }

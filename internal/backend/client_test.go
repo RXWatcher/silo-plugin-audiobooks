@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
@@ -69,6 +70,24 @@ func TestClient_StreamURL(t *testing.T) {
 	want := "http://host.example/api/v1/plugins/inst-7/api/v1/stream/bw-3/0"
 	if got != want {
 		t.Errorf("StreamURL = %q want %q", got, want)
+	}
+}
+
+// bookID flows from backend-provided catalog ids into the redirect URL; a
+// value with path/query metacharacters must be percent-escaped so it can't
+// rewrite the host-proxy path (path injection / wrong-route).
+func TestClient_StreamCoverURL_EscapeBookID(t *testing.T) {
+	c := backend.NewClient(backend.NewHostClient("http://host.example"))
+	st := c.StreamURL("inst-7", "a/../b?x", 3)
+	if strings.Contains(st, "a/../b?x") {
+		t.Errorf("StreamURL did not escape bookID: %s", st)
+	}
+	if !strings.Contains(st, "/api/v1/stream/a%2F..%2Fb%3Fx/3") {
+		t.Errorf("StreamURL = %s", st)
+	}
+	cv := c.CoverURL("inst-7", "a/../b?x", "large")
+	if strings.Contains(cv, "a/../b?x") {
+		t.Errorf("CoverURL did not escape bookID: %s", cv)
 	}
 }
 

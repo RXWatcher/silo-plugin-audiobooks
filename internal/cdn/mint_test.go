@@ -42,3 +42,13 @@ func TestPresignedURL_Shape(t *testing.T) {
 		t.Errorf("u = %q, want %q", u, want)
 	}
 }
+
+// bookID must be percent-escaped so a crafted catalog id can't inject a
+// path/query into the presigned redirect URL.
+func TestPresignedURL_EscapesBookID(t *testing.T) {
+	u := cdn.PresignedURL("cdn.example.com", "a/../b?x", 0, "TOK")
+	want := "https://cdn.example.com/api/v1/file/a%2F..%2Fb%3Fx?token=TOK"
+	if u != want {
+		t.Errorf("u = %q, want %q", u, want)
+	}
+}

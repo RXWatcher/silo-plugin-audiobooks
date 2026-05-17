@@ -7,6 +7,7 @@ package cdn
 
 import (
 	"errors"
+	"net/url"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -39,5 +40,5 @@ func MintStreamToken(secret []byte, userID, bookID string, fileIdx int, ttl time
 // hostname is e.g. "audiobooks-cdn.example.com" (no scheme, no trailing
 // slash). The result includes "https://".
 func PresignedURL(hostname, bookID string, fileIdx int, token string) string {
-	return "https://" + hostname + "/api/v1/file/" + bookID + "?token=" + token
+	return "https://" + hostname + "/api/v1/file/" + url.PathEscape(bookID) + "?token=" + url.QueryEscape(token)
 }

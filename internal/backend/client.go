@@ -121,12 +121,12 @@ func (c *Client) CoverURL(installID, bookID, size string) string {
 	if size == "" {
 		size = "large"
 	}
-	return c.host.PluginURL(installID, fmt.Sprintf("/api/v1/cover/%s/%s", bookID, size))
+	return c.host.PluginURL(installID, fmt.Sprintf("/api/v1/cover/%s/%s", url.PathEscape(bookID), url.PathEscape(size)))
 }
 
 // StreamURL returns the public URL for a stream redirect.
 func (c *Client) StreamURL(installID, bookID string, fileIdx int) string {
-	return c.host.PluginURL(installID, fmt.Sprintf("/api/v1/stream/%s/%d", bookID, fileIdx))
+	return c.host.PluginURL(installID, fmt.Sprintf("/api/v1/stream/%s/%d", url.PathEscape(bookID), fileIdx))
 }
 
 // GetRequestSnapshot calls GET /api/v1/requests/{external_id}.

@@ -4,6 +4,8 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
@@ -14,6 +16,17 @@ import (
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/store"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/streaming"
 )
+
+// taskID extracts the capability id from a scheduled-task key. The Continuum
+// host sends "plugin:<installationID>:<capabilityID>" (task_registry
+// pluginTaskKey); bare ids may arrive from host integration tests. This
+// plugin's task ids contain no ':'.
+func taskID(key string) string {
+	if i := strings.LastIndexByte(key, ':'); i >= 0 {
+		return key[i+1:]
+	}
+	return key
+}
 
 // Deps wires the scheduler's runtime collaborators.
 type Deps struct {
@@ -45,18 +58,29 @@ func New(depsFn func() *Deps, logger hclog.Logger) *Server {
 func (s *Server) Run(ctx context.Context, req *pluginv1.RunScheduledTaskRequest) (*pluginv1.RunScheduledTaskResponse, error) {
 	d := s.depsFn()
 	if d == nil || d.Store == nil {
-		return &pluginv1.RunScheduledTaskResponse{}, nil
+		// Capability servers serve before Configure runs. Error so the host
+		// retries this tick once configured instead of reporting a
+		// successful no-op (which would silently skip every reconcile, the
+		// session reaper and cache eviction — letting the audio cache grow
+		// unbounded and ABS sessions leak).
+		return nil, fmt.Errorf("plugin not configured yet")
 	}
 
-	switch req.GetTaskKey() {
+	switch taskID(req.GetTaskKey()) {
 	case "request_reconciler":
+		// The manifest declares a single task that "polls backend for missed
+		// status events; closes idle ABS sessions; LRU-evicts cached audio".
+		// Run all three — previously only reconcileRequests ran, so session
+		// reaping and cache eviction never happened at all.
 		s.reconcileRequests(ctx, d)
+		s.reapSessions(ctx, d)
+		s.evictCache(ctx, d)
 	case "abs_session_reaper":
 		s.reapSessions(ctx, d)
 	case "cache_evictor":
 		s.evictCache(ctx, d)
 	default:
-		s.logger.Debug("unknown task", "key", req.GetTaskKey())
+		return nil, fmt.Errorf("unknown task key %q", req.GetTaskKey())
 	}
 	return &pluginv1.RunScheduledTaskResponse{}, nil
 }

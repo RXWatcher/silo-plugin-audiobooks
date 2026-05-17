@@ -4,6 +4,7 @@ package consumer
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -37,18 +38,34 @@ func New(depsFn func() *Deps, logger hclog.Logger) *Handler {
 
 // HandleEvent dispatches one host event by name.
 func (h *Handler) HandleEvent(ctx context.Context, req *pluginv1.HandleEventRequest) (*pluginv1.HandleEventResponse, error) {
-	d := h.depsFn()
-	if d == nil || d.Store == nil {
-		return &pluginv1.HandleEventResponse{}, nil
-	}
 	if req.GetPayload() == nil {
 		return &pluginv1.HandleEventResponse{}, nil
 	}
-	p := req.GetPayload().AsMap()
 	name := req.GetEventName()
-
 	// Event names look like plugin.<backend_id>.<leaf>.
 	leaf := lastSegment(name)
+
+	// Decide if this is an event we act on BEFORE resolving deps: a
+	// foreign/unknown event must be acked (dropped) even before Configure,
+	// otherwise nacking it would make the host redeliver it forever.
+	switch leaf {
+	case "request_acknowledged", "request_status_changed", "request_fulfilled",
+		"request_failed", "audiobook_imported", "audiobook_failed":
+		// handled below
+	default:
+		h.logger.Debug("ignoring unknown event", "name", name)
+		return &pluginv1.HandleEventResponse{}, nil
+	}
+
+	// Our event. If not configured yet, NACK so the host redelivers once
+	// Configure has run — otherwise the request's status update is dropped
+	// permanently and the row is stuck (the reconciler can only recover
+	// fulfilled/failed, not the acknowledged external_id mapping).
+	d := h.depsFn()
+	if d == nil || d.Store == nil {
+		return nil, fmt.Errorf("plugin not configured yet")
+	}
+	p := req.GetPayload().AsMap()
 
 	switch leaf {
 	case "request_acknowledged":
@@ -63,8 +80,6 @@ func (h *Handler) HandleEvent(ctx context.Context, req *pluginv1.HandleEventRequ
 		h.handleImported(ctx, d, p)
 	case "audiobook_failed":
 		h.handleFailed(ctx, d, p)
-	default:
-		h.logger.Debug("ignoring unknown event", "name", name)
 	}
 	return &pluginv1.HandleEventResponse{}, nil
 }

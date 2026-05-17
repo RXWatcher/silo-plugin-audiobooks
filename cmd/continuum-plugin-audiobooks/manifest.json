@@ -21,7 +21,11 @@
         "plugin.continuum.bookwarehouse-audio.request_fulfilled",
         "plugin.continuum.bookwarehouse-audio.request_failed",
         "plugin.continuum.bookwarehouse-audio.audiobook_imported",
-        "plugin.continuum.bookwarehouse-audio.audiobook_failed"
+        "plugin.continuum.bookwarehouse-audio.audiobook_failed",
+        "plugin.continuum.audiobookbay-requests.request_acknowledged",
+        "plugin.continuum.audiobookbay-requests.request_status_changed",
+        "plugin.continuum.audiobookbay-requests.request_fulfilled",
+        "plugin.continuum.audiobookbay-requests.request_failed"
       ]
     },
     {

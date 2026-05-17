@@ -110,7 +110,7 @@ func (s *Store) ListReconcileCandidates(ctx context.Context, limit int) ([]Reque
 		       created_at, updated_at, fulfilled_at
 		FROM request
 		WHERE external_id IS NOT NULL AND status IN ('submitted','acknowledged','queued','downloading')
-		ORDER BY updated_at ASC LIMIT $1
+		ORDER BY updated_at ASC, id ASC LIMIT $1
 	`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list reconcile candidates: %w", err)
@@ -119,14 +119,18 @@ func (s *Store) ListReconcileCandidates(ctx context.Context, limit int) ([]Reque
 	return collectRequests(rows)
 }
 
-// UpdateRequestStatus transitions a request to the given status.
+// UpdateRequestStatus transitions a request to the given status. The terminal
+// guard (the same set MarkRequestFulfilled uses) stops a late / out-of-order /
+// replayed backend status event or reconciler tick from resurrecting a
+// request that already reached a terminal state. Admin approve/deny act on
+// non-terminal (pending) requests so they are unaffected.
 func (s *Store) UpdateRequestStatus(ctx context.Context, id, status string, denied, failure string) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE request SET status = $2,
 			denied_reason = COALESCE(NULLIF($3,''), denied_reason),
 			failure_reason = COALESCE(NULLIF($4,''), failure_reason),
 			updated_at = now()
-		WHERE id = $1
+		WHERE id = $1 AND status NOT IN ('imported','denied','cancelled')
 	`, id, status, denied, failure)
 	if err != nil {
 		return fmt.Errorf("update request status: %w", err)
@@ -134,11 +138,13 @@ func (s *Store) UpdateRequestStatus(ctx context.Context, id, status string, deni
 	return nil
 }
 
-// SetRequestExternal stores the backend's external_id and status.
+// SetRequestExternal stores the backend's external_id and status. Same
+// terminal guard as UpdateRequestStatus so a replayed request_acknowledged
+// can't reopen an already-terminal request.
 func (s *Store) SetRequestExternal(ctx context.Context, id, externalID, status string) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE request SET external_id = NULLIF($2,''), status = $3, updated_at = now()
-		WHERE id = $1
+		WHERE id = $1 AND status NOT IN ('imported','denied','cancelled')
 	`, id, externalID, status)
 	if err != nil {
 		return fmt.Errorf("set request external: %w", err)

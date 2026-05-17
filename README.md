@@ -9,6 +9,10 @@ Install this plugin when you want a single audiobook experience in Continuum
 that can sit in front of local libraries, external BookWarehouse instances, or
 request providers such as `continuum.audiobookbay-requests`.
 
+## Detailed Operations Docs
+
+- [Setup, debugging, and communication flows](docs/setup-debug-flows.md)
+
 ## Features
 
 - Authenticated Audiobooks web app for browsing, searching, requesting, and

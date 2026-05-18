@@ -88,6 +88,10 @@ func wrapCatalogItems(env backend.PageEnvelope[backend.AudiobookSummary], lib st
 	return env
 }
 
+func emptyPageEnvelope[T any]() backend.PageEnvelope[T] {
+	return backend.PageEnvelope[T]{Items: []T{}}
+}
+
 func parseListParams(r *http.Request) backend.ListParams {
 	p := backend.ListParams{
 		Cursor: r.URL.Query().Get("cursor"),
@@ -109,7 +113,7 @@ func (s *Server) handleListAudiobooks(w http.ResponseWriter, r *http.Request) {
 	}
 	lib, err := s.targetLibrary(r, queryLibraryID(r))
 	if err != nil {
-		writeError(w, http.StatusPreconditionFailed, err.Error())
+		writeJSON(w, http.StatusOK, emptyPageEnvelope[backend.AudiobookSummary]())
 		return
 	}
 	params := parseListParams(r)
@@ -129,7 +133,7 @@ func (s *Server) handleSearchAudiobooks(w http.ResponseWriter, r *http.Request) 
 	}
 	lib, err := s.targetLibrary(r, queryLibraryID(r))
 	if err != nil {
-		writeError(w, http.StatusPreconditionFailed, err.Error())
+		writeJSON(w, http.StatusOK, emptyPageEnvelope[backend.AudiobookSummary]())
 		return
 	}
 	p := parseListParams(r)
@@ -208,7 +212,7 @@ func (s *Server) handleBrowseAuthors(w http.ResponseWriter, r *http.Request) {
 	}
 	lib, err := s.targetLibrary(r, queryLibraryID(r))
 	if err != nil {
-		writeError(w, http.StatusPreconditionFailed, err.Error())
+		writeJSON(w, http.StatusOK, emptyPageEnvelope[backend.AuthorSummary]())
 		return
 	}
 	params := parseListParams(r)
@@ -228,7 +232,7 @@ func (s *Server) handleBrowseSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	lib, err := s.targetLibrary(r, queryLibraryID(r))
 	if err != nil {
-		writeError(w, http.StatusPreconditionFailed, err.Error())
+		writeJSON(w, http.StatusOK, emptyPageEnvelope[backend.SeriesSummary]())
 		return
 	}
 	params := parseListParams(r)
@@ -248,7 +252,7 @@ func (s *Server) handleBrowseNarrators(w http.ResponseWriter, r *http.Request) {
 	}
 	lib, err := s.targetLibrary(r, queryLibraryID(r))
 	if err != nil {
-		writeError(w, http.StatusPreconditionFailed, err.Error())
+		writeJSON(w, http.StatusOK, emptyPageEnvelope[backend.NarratorSummary]())
 		return
 	}
 	params := parseListParams(r)

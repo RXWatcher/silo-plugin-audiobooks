@@ -40,7 +40,15 @@ export async function authedFetch(input: string, init?: RequestInit): Promise<Re
 
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status}: ${await r.text().catch(() => '')}`);
-  return r.json();
+  const data = await r.json();
+  return normalizeListEnvelope(data) as T;
+}
+
+function normalizeListEnvelope(data: unknown): unknown {
+  if (data && typeof data === 'object' && 'items' in data && (data as { items: unknown }).items == null) {
+    return { ...data, items: [] };
+  }
+  return data;
 }
 
 async function noContentOrThrow(r: Response): Promise<void> {

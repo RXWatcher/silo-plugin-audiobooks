@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router';
 import { api } from '@/api/client';
 import AudiobookGrid from '@/components/AudiobookGrid';
 import SearchBar from '@/components/SearchBar';
+import { isAdmin } from '@/lib/identity';
 
 export default function Home() {
   const [params] = useSearchParams();
@@ -16,6 +17,7 @@ export default function Home() {
 
 function Shelves() {
   const [params] = useSearchParams();
+  const admin = isAdmin();
   const libraryID = Number(params.get('library_id') || 0) || undefined;
   const libraries = useQuery({
     queryKey: ['libraries'],
@@ -77,9 +79,40 @@ function Shelves() {
         <AudiobookGrid
           items={recent.data?.items ?? []}
           loading={recent.isLoading}
-          empty="No audiobooks yet. Ask an admin to configure a backend in /admin/settings."
+          empty={<EmptyLibraryState isAdmin={admin} />}
         />
       </section>
+    </div>
+  );
+}
+
+function EmptyLibraryState({ isAdmin }: { isAdmin: boolean }) {
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-surface/40 p-8 text-center">
+      <h3 className="text-base font-semibold text-foreground">No audiobooks are available yet</h3>
+      <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
+        The portal is running, but no reachable audiobook library is currently selected.
+      </p>
+      {isAdmin ? (
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <Link
+            to="/admin/settings"
+            className="inline-flex min-h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground"
+          >
+            Configure backend
+          </Link>
+          <Link
+            to="/admin"
+            className="inline-flex min-h-9 items-center rounded-md border border-border px-3 text-sm font-medium"
+          >
+            Review requests
+          </Link>
+        </div>
+      ) : (
+        <p className="mt-4 text-xs text-muted-foreground">
+          Ask an administrator to connect an audiobook backend or run a library scan.
+        </p>
+      )}
     </div>
   );
 }

@@ -86,6 +86,21 @@
       "navigable": true,
       "navigation_label": "Audiobooks",
       "navigation_kind": "user"
+    },
+    {
+      "id": "admin",
+      "method": "GET",
+      "path": "/admin",
+      "access": "admin",
+      "navigable": true,
+      "navigation_label": "Audiobooks",
+      "navigation_kind": "admin"
+    },
+    {
+      "id": "admin_app",
+      "method": "GET",
+      "path": "/admin/*",
+      "access": "admin"
     }
   ],
   "global_config_schema": [

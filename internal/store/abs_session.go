@@ -136,6 +136,40 @@ func (s *Store) ListActiveABSSessions(ctx context.Context, limit int) ([]ABSSess
 	return out, rows.Err()
 }
 
+// ListActiveABSSessionsForUser returns active sessions owned by one user.
+func (s *Store) ListActiveABSSessionsForUser(ctx context.Context, userID string, limit int) ([]ABSSession, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, user_id, book_id, device_id, device_info, play_method,
+		       COALESCE(media_player,''), start_time, current_time_ms, started_at,
+		       last_update, closed_at
+		FROM abs_playback_session
+		WHERE closed_at IS NULL AND user_id = $1
+		ORDER BY last_update DESC LIMIT $2
+	`, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list active user sessions: %w", err)
+	}
+	defer rows.Close()
+	var out []ABSSession
+	for rows.Next() {
+		var sess ABSSession
+		var info []byte
+		if err := rows.Scan(&sess.ID, &sess.UserID, &sess.BookID, &sess.DeviceID,
+			&info, &sess.PlayMethod, &sess.MediaPlayer, &sess.StartTime, &sess.CurrentTime,
+			&sess.StartedAt, &sess.LastUpdate, &sess.ClosedAt); err != nil {
+			return nil, fmt.Errorf("scan abs_session: %w", err)
+		}
+		if len(info) > 0 {
+			_ = json.Unmarshal(info, &sess.DeviceInfo)
+		}
+		out = append(out, sess)
+	}
+	return out, rows.Err()
+}
+
 // ReapIdleABSSessions closes any sessions whose last_update is older than the
 // given age. Returns count.
 func (s *Store) ReapIdleABSSessions(ctx context.Context, maxAge time.Duration) (int, error) {

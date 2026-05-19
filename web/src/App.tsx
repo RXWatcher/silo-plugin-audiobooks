@@ -18,10 +18,11 @@ import AdminSettings from '@/pages/admin/Settings';
 import AdminSessions from '@/pages/admin/Sessions';
 import AdminTokens from '@/pages/admin/Tokens';
 import { Toaster } from '@/components/ui/sonner';
+import { PlaybackProvider } from '@/player/PlaybackProvider';
 
 export default function App() {
   return (
-    <>
+    <PlaybackProvider>
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
@@ -45,6 +46,6 @@ export default function App() {
         </Route>
       </Routes>
       <Toaster />
-    </>
+    </PlaybackProvider>
   );
 }

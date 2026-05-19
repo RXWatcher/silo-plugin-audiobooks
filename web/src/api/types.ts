@@ -171,6 +171,20 @@ export interface ABSToken {
   created_at: string;
 }
 
+export interface ListeningStats {
+  user_id: string;
+  book_id: string;
+  listened_seconds: number;
+  last_position: number;
+  updated_at?: string;
+}
+
+export interface PlaybackSession {
+  id: string;
+  book_id: string;
+  current_seconds: number;
+}
+
 export interface AuthorSummary {
   id: string;
   name: string;

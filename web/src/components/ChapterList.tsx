@@ -9,14 +9,30 @@ function fmt(t: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export default function ChapterList({ chapters }: { chapters: AudiobookChapter[] }) {
+export default function ChapterList({
+  chapters,
+  activePosition,
+  onSelect,
+}: {
+  chapters: AudiobookChapter[];
+  activePosition?: number;
+  onSelect?: (position: number) => void;
+}) {
   if (!chapters.length) return null;
   return (
     <div className="space-y-1">
       {chapters.map((c, i) => (
-        <div
+        <button
           key={i}
-          className="hover:bg-surface-hover flex items-center justify-between rounded-md px-3 py-2 text-sm"
+          type="button"
+          onClick={() => onSelect?.(c.start_seconds)}
+          className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-surface-hover ${
+            activePosition != null &&
+            activePosition >= c.start_seconds &&
+            activePosition < c.end_seconds
+              ? 'bg-primary/10 text-primary'
+              : ''
+          }`}
         >
           <div className="flex-1 truncate">
             <span className="text-muted-foreground mr-2 text-xs tabular-nums">
@@ -27,7 +43,7 @@ export default function ChapterList({ chapters }: { chapters: AudiobookChapter[]
           <div className="text-muted-foreground tabular-nums text-xs">
             {fmt(c.start_seconds)}
           </div>
-        </div>
+        </button>
       ))}
     </div>
   );

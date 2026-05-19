@@ -14,9 +14,11 @@ function fmt(t: number): string {
 export default function BookmarkList({
   bookmarks,
   onDelete,
+  onSelect,
 }: {
   bookmarks: Bookmark[];
   onDelete?: (id: string) => void;
+  onSelect?: (position: number) => void;
 }) {
   if (!bookmarks.length) return <div className="text-muted-foreground text-sm">No bookmarks yet.</div>;
   return (
@@ -26,10 +28,14 @@ export default function BookmarkList({
           key={b.id}
           className="hover:bg-surface-hover flex items-center justify-between rounded-md px-3 py-2 text-sm"
         >
-          <div className="flex-1">
+          <button
+            type="button"
+            onClick={() => onSelect?.(b.position_seconds)}
+            className="flex-1 text-left"
+          >
             <div className="text-muted-foreground tabular-nums text-xs">{fmt(b.position_seconds)}</div>
             {b.note && <div className="mt-1">{b.note}</div>}
-          </div>
+          </button>
           {onDelete && (
             <Button size="icon" variant="ghost" onClick={() => onDelete(b.id)}>
               <Trash2 className="size-4" />

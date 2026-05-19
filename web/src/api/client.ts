@@ -13,8 +13,10 @@ import type {
   InstalledBackend,
   InstalledCapability,
   LibraryInfo,
+  ListeningStats,
   NarratorSummary,
   PageEnvelope,
+  PlaybackSession,
   Progress,
   Rating,
   SeriesSummary,
@@ -134,6 +136,58 @@ export const api = {
   ) =>
     authedFetch(`${apiBase()}/audiobooks/${encodeURIComponent(bookId)}/progress`, {
       method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(noContentOrThrow),
+
+  getListeningStats: (bookId: string) =>
+    authedFetch(`${apiBase()}/me/listening-stats/${encodeURIComponent(bookId)}`).then(
+      jsonOrThrow<ListeningStats>,
+    ),
+
+  listMyPlaybackSessions: () =>
+    authedFetch(`${apiBase()}/me/playback-sessions`).then(
+      jsonOrThrow<{ items: ABSSession[] }>,
+    ),
+
+  createPlaybackSession: (
+    bookId: string,
+    body: { current_seconds?: number; device_id?: string; device_info?: Record<string, unknown> },
+  ) =>
+    authedFetch(`${apiBase()}/audiobooks/${encodeURIComponent(bookId)}/playback-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(jsonOrThrow<PlaybackSession>),
+
+  updatePlaybackSession: (
+    sessionId: string,
+    body: {
+      current_seconds: number;
+      duration_seconds?: number;
+      progress_pct?: number;
+      is_finished?: boolean;
+      time_listened_seconds?: number;
+    },
+  ) =>
+    authedFetch(`${apiBase()}/playback-sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(noContentOrThrow),
+
+  closePlaybackSession: (
+    sessionId: string,
+    body: {
+      current_seconds: number;
+      duration_seconds?: number;
+      progress_pct?: number;
+      is_finished?: boolean;
+      time_listened_seconds?: number;
+    },
+  ) =>
+    authedFetch(`${apiBase()}/playback-sessions/${encodeURIComponent(sessionId)}/close`, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then(noContentOrThrow),

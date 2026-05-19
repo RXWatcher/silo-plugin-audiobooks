@@ -3,6 +3,7 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -55,6 +56,15 @@ func req(method, path string, hdr map[string]string) *http.Request {
 	return r
 }
 
+func jsonReq(method, path string, hdr map[string]string, body string) *http.Request {
+	r := httptest.NewRequest(method, path, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	for k, v := range hdr {
+		r.Header.Set(k, v)
+	}
+	return r
+}
+
 var (
 	asUser  = map[string]string{"X-Continuum-User-Id": "alice", "X-Continuum-User-Role": "user"}
 	asAdmin = map[string]string{"X-Continuum-User-Id": "root", "X-Continuum-User-Role": "admin"}
@@ -98,6 +108,157 @@ func TestAdminRevokeToken(t *testing.T) {
 	}
 	if w := do(h, req("POST", "/api/v1/admin/tokens/tok1/revoke", asAdmin)); w.Code != http.StatusNoContent {
 		t.Fatalf("revoke existing = %d body=%s, want 204", w.Code, w.Body)
+	}
+}
+
+func TestWebPlaybackSessionLifecycle(t *testing.T) {
+	h, st := liveServer(t)
+	ctx := context.Background()
+
+	w := do(h, req("POST", "/api/v1/audiobooks/book1/playback-session", asUser))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create session = %d body=%s, want 201", w.Code, w.Body)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatalf("create response missing id")
+	}
+	sess, err := st.GetABSSession(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if sess.UserID != "alice" || sess.BookID != "book1" || sess.MediaPlayer != "continuum-web" {
+		t.Fatalf("unexpected session: %+v", sess)
+	}
+
+	w = do(h, jsonReq("PATCH", "/api/v1/playback-sessions/"+created.ID, asUser, `{"current_seconds":42,"duration_seconds":100}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("sync session = %d body=%s, want 200", w.Code, w.Body)
+	}
+	if sess, err = st.GetABSSession(ctx, created.ID); err != nil || sess.CurrentTime != 42 {
+		t.Fatalf("session current time = %+v err=%v, want 42", sess, err)
+	}
+	p, err := st.GetProgress(ctx, "alice", "book1")
+	if err != nil {
+		t.Fatalf("get progress: %v", err)
+	}
+	if p.CurrentSeconds != 42 || p.ProgressPct < 0.41 || p.ProgressPct > 0.43 || p.IsFinished {
+		t.Fatalf("unexpected progress after sync: %+v", p)
+	}
+
+	w = do(h, jsonReq("POST", "/api/v1/playback-sessions/"+created.ID+"/close", asUser, `{"current_seconds":96,"duration_seconds":100}`))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("close session = %d body=%s, want 204", w.Code, w.Body)
+	}
+	p, err = st.GetProgress(ctx, "alice", "book1")
+	if err != nil {
+		t.Fatalf("get progress after close: %v", err)
+	}
+	if p.CurrentSeconds != 96 || !p.IsFinished {
+		t.Fatalf("final close did not mark finished: %+v", p)
+	}
+}
+
+func TestWebPlaybackSessionOwnershipAndClosedGuards(t *testing.T) {
+	h, st := liveServer(t)
+	ctx := context.Background()
+
+	if err := st.InsertABSSession(ctx, store.ABSSession{
+		ID: "sess1", UserID: "alice", BookID: "book1", DeviceID: "web", MediaPlayer: "continuum-web",
+	}); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	mallory := map[string]string{"X-Continuum-User-Id": "mallory", "X-Continuum-User-Role": "user"}
+	w := do(h, jsonReq("PATCH", "/api/v1/playback-sessions/sess1", mallory, `{"current_seconds":10}`))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("wrong-owner sync = %d body=%s, want 404", w.Code, w.Body)
+	}
+
+	if err := st.CloseABSSession(ctx, "sess1"); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+	w = do(h, jsonReq("PATCH", "/api/v1/playback-sessions/sess1", asUser, `{"current_seconds":10}`))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("closed sync = %d body=%s, want 409", w.Code, w.Body)
+	}
+}
+
+func TestWebPlaybackSessionPositionOnlySyncPreservesFinished(t *testing.T) {
+	h, st := liveServer(t)
+	ctx := context.Background()
+
+	if err := st.InsertABSSession(ctx, store.ABSSession{
+		ID: "sess1", UserID: "alice", BookID: "book1", DeviceID: "web", MediaPlayer: "continuum-web",
+	}); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	if err := st.UpsertProgress(ctx, store.Progress{
+		UserID: "alice", BookID: "book1", CurrentSeconds: 98, ProgressPct: 0.98, IsFinished: true,
+	}); err != nil {
+		t.Fatalf("seed progress: %v", err)
+	}
+
+	w := do(h, jsonReq("PATCH", "/api/v1/playback-sessions/sess1", asUser, `{"current_seconds":12}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("position-only sync = %d body=%s, want 200", w.Code, w.Body)
+	}
+	p, err := st.GetProgress(ctx, "alice", "book1")
+	if err != nil {
+		t.Fatalf("get progress: %v", err)
+	}
+	if p.CurrentSeconds != 12 || p.ProgressPct != 0.98 || !p.IsFinished {
+		t.Fatalf("position-only sync changed finished fields: %+v", p)
+	}
+}
+
+func TestWebPlaybackSessionStatsAndUserSessionList(t *testing.T) {
+	h, st := liveServer(t)
+	ctx := context.Background()
+
+	if err := st.InsertABSSession(ctx, store.ABSSession{
+		ID: "sess1", UserID: "alice", BookID: "book1", DeviceID: "web", MediaPlayer: "continuum-web",
+	}); err != nil {
+		t.Fatalf("insert alice session: %v", err)
+	}
+	if err := st.InsertABSSession(ctx, store.ABSSession{
+		ID: "sess2", UserID: "mallory", BookID: "book2", DeviceID: "web", MediaPlayer: "continuum-web",
+	}); err != nil {
+		t.Fatalf("insert mallory session: %v", err)
+	}
+
+	w := do(h, req("GET", "/api/v1/me/playback-sessions", asUser))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list sessions = %d body=%s, want 200", w.Code, w.Body)
+	}
+	var listed struct {
+		Items []store.ABSSession `json:"items"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode sessions: %v", err)
+	}
+	if len(listed.Items) != 1 || listed.Items[0].ID != "sess1" {
+		t.Fatalf("listed wrong sessions: %+v", listed.Items)
+	}
+
+	w = do(h, jsonReq("PATCH", "/api/v1/playback-sessions/sess1", asUser, `{"current_seconds":30,"time_listened_seconds":7}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("sync stats = %d body=%s, want 200", w.Code, w.Body)
+	}
+	w = do(h, req("GET", "/api/v1/me/listening-stats/book1", asUser))
+	if w.Code != http.StatusOK {
+		t.Fatalf("get stats = %d body=%s, want 200", w.Code, w.Body)
+	}
+	var stats store.ListeningStats
+	if err := json.NewDecoder(w.Body).Decode(&stats); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	if stats.ListenedSeconds != 7 || stats.LastPosition != 30 {
+		t.Fatalf("unexpected stats: %+v", stats)
 	}
 }
 

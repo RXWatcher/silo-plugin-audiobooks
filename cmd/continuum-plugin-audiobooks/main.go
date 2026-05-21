@@ -320,9 +320,10 @@ func main() {
 			return nil
 		}
 		return &scheduler.Deps{
-			Store:       st,
-			Backend:     bkClient,
-			PodcastFeed: podcastRefresher,
+			Store:        st,
+			Backend:      bkClient,
+			PodcastFeed:  podcastRefresher,
+			BookDropPath: os.Getenv("BOOKDROP_PATH"),
 		}
 	}, logger)
 

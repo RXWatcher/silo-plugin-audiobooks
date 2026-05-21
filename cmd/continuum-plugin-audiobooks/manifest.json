@@ -53,6 +53,20 @@
       "display_name": "Refresh podcast RSS feeds",
       "description": "Walks podcasts whose refresh window has elapsed and upserts new episodes from their RSS feeds.",
       "cron": "*/10 * * * *"
+    },
+    {
+      "type": "scheduled_task.v1",
+      "id": "purge_expired",
+      "display_name": "Purge expired share links + recommendation cache",
+      "description": "Drops share_link rows past their expires_at and recommendation_cache rows past their TTL. Idempotent.",
+      "cron": "0 */6 * * *"
+    },
+    {
+      "type": "scheduled_task.v1",
+      "id": "bookdrop_scan",
+      "display_name": "BookDrop watched-folder scan",
+      "description": "Walks BOOKDROP_PATH and enqueues new audio files as pending_import rows. Empty path = no-op.",
+      "cron": "*/15 * * * *"
     }
   ],
   "http_routes": [

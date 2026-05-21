@@ -32,6 +32,37 @@ func (s *Server) mountBookDropRoutes(r chi.Router) {
 	r.Post("/admin/bookdrop/{id}/reject", s.handleRejectPendingImport)
 	r.Delete("/admin/bookdrop/{id}", s.handleDeletePendingImport)
 	r.Post("/admin/bookdrop/scan", s.handleScanBookDrop)
+	r.Get("/admin/bookdrop/{id}/cover", s.handleGetBookDropCover)
+}
+
+// handleGetBookDropCover streams the embedded cover the scanner
+// stashed for a pending_import row. Admin-only — the cover may
+// contain PII or copyright-restricted artwork the operator
+// doesn't want exposed publicly.
+func (s *Server) handleGetBookDropCover(w http.ResponseWriter, r *http.Request) {
+	if _, ok := auth.RequireAdmin(w, r); !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	data, mime, err := s.d.Store.GetPendingImportCover(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	if len(data) == 0 {
+		writeError(w, http.StatusNotFound, "no embedded cover")
+		return
+	}
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", mime)
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	_, _ = w.Write(data)
 }
 
 func (s *Server) handleListPendingImports(w http.ResponseWriter, r *http.Request) {

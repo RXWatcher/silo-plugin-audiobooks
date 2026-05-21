@@ -119,7 +119,7 @@ func (s *Scanner) upsertOne(ctx context.Context, st *store.Store, path string) e
 	if err != nil {
 		return fmt.Errorf("stat: %w", err)
 	}
-	meta := parseTags(path)
+	meta, coverData, coverMIME := parseTagsAndCover(path)
 	if meta.Title == "" {
 		// Fall back to the filename minus extension when the file
 		// has no embedded title tag. Better than empty in the
@@ -136,7 +136,52 @@ func (s *Scanner) upsertOne(ctx context.Context, st *store.Store, path string) e
 		SizeBytes: fi.Size(),
 		Metadata:  metaJSON,
 		Status:    "pending",
+		CoverData: coverData,
+		CoverMIME: coverMIME,
 	})
+}
+
+// parseTagsAndCover combines tag parsing with embedded cover
+// extraction in a single file pass. ID3v2 APIC frames + MP4 'covr'
+// atoms + FLAC METADATA_BLOCK_PICTURE all expose covers via
+// dhowden/tag's Picture() — we copy the bytes + record the MIME
+// for the admin review UI.
+//
+// Returns the parsed metadata + cover bytes + MIME. Cover bytes
+// are nil when the file has no embedded cover.
+func parseTagsAndCover(path string) (ParsedMetadata, []byte, string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return ParsedMetadata{}, nil, ""
+	}
+	defer f.Close()
+	m, err := tag.ReadFrom(f)
+	if err != nil {
+		return ParsedMetadata{}, nil, ""
+	}
+	meta := ParsedMetadata{
+		Title:   m.Title(),
+		Album:   m.Album(),
+		Genre:   m.Genre(),
+		Year:    m.Year(),
+		Comment: m.Comment(),
+	}
+	if artist := m.Artist(); artist != "" {
+		meta.Authors = splitNames(artist)
+	}
+	if composer := m.Composer(); composer != "" {
+		meta.Narrator = composer
+	}
+	var coverData []byte
+	var coverMIME string
+	if pic := m.Picture(); pic != nil && len(pic.Data) > 0 {
+		coverData = pic.Data
+		coverMIME = pic.MIMEType
+		if coverMIME == "" && pic.Ext != "" {
+			coverMIME = "image/" + pic.Ext
+		}
+	}
+	return meta, coverData, coverMIME
 }
 
 // parseTags reads ID3 / MP4 / FLAC / Ogg metadata from one file.

@@ -216,6 +216,12 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Post("/abs/api/items/{id}/play/{episodeId}", h.handlePlayEpisode)
 		r.Get("/abs/api/me/progress/{itemId}", h.handleGetProgress)
 		r.Patch("/abs/api/me/progress/{itemId}", h.handlePatchProgress)
+		r.Delete("/abs/api/me/progress/{itemId}", h.handleDeleteProgress)
+		// Real ABS uses GET (not DELETE) for these — they don't remove
+		// the progress row, just toggle a visibility flag. Mirror exactly.
+		r.Get("/abs/api/me/progress/{itemId}/remove-from-continue-listening", h.handleHideFromContinue)
+		r.Get("/abs/api/me/progress/{itemId}/readd-to-continue-listening", h.handleUnhideFromContinue)
+		r.Get("/abs/api/me/items-in-progress", h.handleItemsInProgress)
 		r.Post("/abs/api/me/item/{itemId}/bookmark", h.handleCreateBookmark)
 		r.Patch("/abs/api/me/item/{itemId}/bookmark", h.handleUpdateBookmark)
 		r.Delete("/abs/api/me/item/{itemId}/bookmark/{time}", h.handleDeleteBookmark)

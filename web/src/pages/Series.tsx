@@ -1,11 +1,21 @@
 import { Link } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { api } from '@/api/client';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import InfiniteFooter from '@/components/InfiniteFooter';
+import type { PageEnvelope, SeriesSummary } from '@/api/types';
+
+const PAGE_SIZE = 100;
 
 export default function Series() {
-  const q = useQuery({ queryKey: ['browse', 'series'], queryFn: () => api.browseSeries({ limit: 100 }) });
+  const q = useInfiniteQuery({
+    queryKey: ['browse', 'series'],
+    initialPageParam: '',
+    queryFn: ({ pageParam }) =>
+      api.browseSeries({ limit: PAGE_SIZE, cursor: pageParam as string | undefined }),
+    getNextPageParam: (last: PageEnvelope<SeriesSummary>) => last.next_cursor || undefined,
+  });
   if (q.isLoading)
     return (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
@@ -14,7 +24,7 @@ export default function Series() {
         ))}
       </div>
     );
-  const items = q.data?.items ?? [];
+  const items = q.data?.pages.flatMap((p) => p.items) ?? [];
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-semibold">Series</h2>
@@ -30,6 +40,12 @@ export default function Series() {
           </Link>
         ))}
       </div>
+      <InfiniteFooter
+        hasNextPage={q.hasNextPage}
+        isFetchingNextPage={q.isFetchingNextPage}
+        fetchNextPage={() => q.fetchNextPage()}
+        label="series"
+      />
     </div>
   );
 }

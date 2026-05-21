@@ -1,13 +1,23 @@
 import { Link } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { api } from '@/api/client';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import InfiniteFooter from '@/components/InfiniteFooter';
+import type { PageEnvelope, AuthorSummary } from '@/api/types';
+
+const PAGE_SIZE = 100;
 
 export default function Authors() {
-  const q = useQuery({
+  // Infinite scroll instead of a hardcoded limit:200. A growing library
+  // silently truncated under the old fixed cap; cursor-based pagination
+  // surfaces "Load more" so the operator knows there's more to see.
+  const q = useInfiniteQuery({
     queryKey: ['browse', 'authors'],
-    queryFn: () => api.browseAuthors({ limit: 200 }),
+    initialPageParam: '',
+    queryFn: ({ pageParam }) =>
+      api.browseAuthors({ limit: PAGE_SIZE, cursor: pageParam as string | undefined }),
+    getNextPageParam: (last: PageEnvelope<AuthorSummary>) => last.next_cursor || undefined,
   });
   if (q.isLoading)
     return (
@@ -17,7 +27,7 @@ export default function Authors() {
         ))}
       </div>
     );
-  const items = q.data?.items ?? [];
+  const items = q.data?.pages.flatMap((p) => p.items) ?? [];
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-semibold">Authors</h2>
@@ -33,6 +43,12 @@ export default function Authors() {
           </Link>
         ))}
       </div>
+      <InfiniteFooter
+        hasNextPage={q.hasNextPage}
+        isFetchingNextPage={q.isFetchingNextPage}
+        fetchNextPage={() => q.fetchNextPage()}
+        label="authors"
+      />
     </div>
   );
 }

@@ -28,6 +28,23 @@ func TestHostClient_BuildsURLAndAddsBearer(t *testing.T) {
 	}
 }
 
+func TestHostClient_UsesServiceTokenWhenBearerMissing(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	c := backend.NewHostClient(srv.URL).WithServiceToken("svc-token")
+	if _, err := c.Get(context.Background(), "", "inst-7", "/api/v1/catalog"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if gotAuth != "Bearer svc-token" {
+		t.Fatalf("Authorization = %q, want service token fallback", gotAuth)
+	}
+}
+
 func TestClient_ListCatalog(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/plugins/inst-7/api/v1/catalog" {
@@ -67,7 +84,7 @@ func TestClient_GetDetail(t *testing.T) {
 func TestClient_StreamURL(t *testing.T) {
 	c := backend.NewClient(backend.NewHostClient("http://host.example"))
 	got := c.StreamURL("inst-7", "bw-3", 0)
-	want := "http://host.example/api/v1/plugins/inst-7/api/v1/stream/bw-3/0"
+	want := "/api/v1/plugins/inst-7/api/v1/stream/bw-3/0"
 	if got != want {
 		t.Errorf("StreamURL = %q want %q", got, want)
 	}

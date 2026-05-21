@@ -124,6 +124,18 @@ func (c *Client) CoverURL(installID, bookID, size string) string {
 	return c.host.PluginURL(installID, fmt.Sprintf("/api/v1/cover/%s/%s", url.PathEscape(bookID), url.PathEscape(size)))
 }
 
+// FetchCover fetches the cover bytes + content-type from the backend plugin.
+// Use this when the caller is on an origin (e.g. the audiobooks plugin's
+// standalone ABS listener) where the path-only CoverURL isn't reachable, so
+// the proxy must serve bytes directly. See booklore-ng's cover-handler for
+// the precedent — some ABS clients don't follow redirects on cover URLs.
+func (c *Client) FetchCover(ctx context.Context, bearer, installID, bookID, size string) ([]byte, string, error) {
+	if size == "" {
+		size = "large"
+	}
+	return c.host.GetBinary(ctx, bearer, installID, fmt.Sprintf("/api/v1/cover/%s/%s", url.PathEscape(bookID), url.PathEscape(size)))
+}
+
 // StreamURL returns the public URL for a stream redirect.
 func (c *Client) StreamURL(installID, bookID string, fileIdx int) string {
 	return c.host.PluginURL(installID, fmt.Sprintf("/api/v1/stream/%s/%d", url.PathEscape(bookID), fileIdx))

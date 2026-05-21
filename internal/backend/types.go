@@ -1,6 +1,6 @@
 // Package backend is the portal's typed client for any audiobook_backend.v1
-// plugin. All calls go through the host plugin proxy with the user's bearer
-// forwarded.
+// plugin. All calls go through the host plugin proxy, preferring the user's
+// bearer when present and otherwise falling back to the plugin service token.
 package backend
 
 // AuthorRef carries a stable ID + display name for an author. IDs are
@@ -49,6 +49,11 @@ type AudiobookFile struct {
 	SizeBytes       int64  `json:"size_bytes"`
 	DurationSeconds int    `json:"duration_seconds"`
 	MimeType        string `json:"mime_type"`
+	// StreamURL is the portal-signed host plugin proxy URL the SPA puts in
+	// <audio src>. Includes a short-TTL signed media token in the query so
+	// the backend validates without needing host-side auth (browser <audio>
+	// tags can't send Authorization headers).
+	StreamURL string `json:"stream_url,omitempty"`
 }
 
 // Chapter mirrors the backend's chapter marker.

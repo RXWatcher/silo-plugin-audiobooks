@@ -1,9 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { api } from '@/api/client';
 import AudiobookGrid from '@/components/AudiobookGrid';
 import SearchBar from '@/components/SearchBar';
 import { isAdmin } from '@/lib/identity';
+import type { AudiobookDetail, AudiobookSummary } from '@/api/types';
 
 export default function Home() {
   const [params] = useSearchParams();
@@ -24,8 +25,12 @@ function Shelves() {
     queryFn: () => api.listLibraries(),
   });
 
+  // Continue-listening shelf — distinct from the cache the grid cards read.
+  // The cards use ['progress','recent'] (limit 50, full list) so they can
+  // resolve any book's progress without refetching per-card. This key is
+  // narrower (12, library-scoped) and feeds only the Continue Listening row.
   const progress = useQuery({
-    queryKey: ['progress', 'recent', libraryID],
+    queryKey: ['progress', 'continue-listening', libraryID],
     queryFn: () => api.listMyProgress(12),
   });
 
@@ -60,17 +65,8 @@ function Shelves() {
         </div>
       )}
 
-      {progress.data?.items && progress.data.items.length > 0 && (
-        <section>
-          <h3 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
-            Continue listening
-          </h3>
-          <div className="text-muted-foreground bg-surface rounded-lg border p-4 text-sm">
-            {progress.data.items.length} book{progress.data.items.length === 1 ? '' : 's'} in
-            progress.
-          </div>
-        </section>
-      )}
+      <ContinueListeningShelf progressBookIds={progress.data?.items.map((p) => p.book_id) ?? []} />
+
 
       <section>
         <h3 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
@@ -86,6 +82,43 @@ function Shelves() {
   );
 }
 
+// ContinueListeningShelf fans out N parallel detail fetches for the user's
+// most-recent in-progress books, then renders them as a cover grid. The
+// /me/progress endpoint only carries (book_id, progress_pct) pairs — book
+// metadata lives in the backend plugin, so the join has to happen client-
+// side until/unless the portal grows a "progress with book metadata" route.
+function ContinueListeningShelf({ progressBookIds }: { progressBookIds: string[] }) {
+  const queries = useQueries({
+    queries: progressBookIds.map((id) => ({
+      queryKey: ['audiobook', id],
+      queryFn: () => api.getAudiobook(id),
+      // The detail RPC is cheap server-side (the portal caches catalog), but
+      // many cards x reload still adds up. 5 min keeps it warm without
+      // blocking fresh progress reads.
+      staleTime: 5 * 60 * 1000,
+    })),
+  });
+  if (!progressBookIds.length) return null;
+  // AudiobookGrid only needs the summary-shaped subset of detail — drop the
+  // detail-only files/chapters fields before handing off so the type matches.
+  const items: AudiobookSummary[] = queries
+    .map((q) => q.data?.audiobook as AudiobookDetail | undefined)
+    .filter((b): b is AudiobookDetail => Boolean(b))
+    .map((b) => b as AudiobookSummary);
+  // Don't flash an empty shelf during the initial fetch — wait until at
+  // least one detail comes back. If none do (all errored), hide the section.
+  const loading = queries.some((q) => q.isLoading);
+  if (!items.length && !loading) return null;
+  return (
+    <section>
+      <h3 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+        Continue listening
+      </h3>
+      <AudiobookGrid items={items} loading={loading} empty={null} />
+    </section>
+  );
+}
+
 function EmptyLibraryState({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="rounded-lg border border-dashed border-border bg-surface/40 p-8 text-center">
@@ -96,7 +129,7 @@ function EmptyLibraryState({ isAdmin }: { isAdmin: boolean }) {
       {isAdmin ? (
         <div className="mt-4 flex flex-wrap justify-center gap-2">
           <Link
-            to="/admin/settings"
+            to="/admin"
             className="inline-flex min-h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground"
           >
             Configure backend

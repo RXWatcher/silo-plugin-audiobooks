@@ -1,13 +1,20 @@
 import { Link } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { api } from '@/api/client';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import InfiniteFooter from '@/components/InfiniteFooter';
+import type { PageEnvelope, NarratorSummary } from '@/api/types';
+
+const PAGE_SIZE = 100;
 
 export default function Narrators() {
-  const q = useQuery({
+  const q = useInfiniteQuery({
     queryKey: ['browse', 'narrators'],
-    queryFn: () => api.browseNarrators({ limit: 200 }),
+    initialPageParam: '',
+    queryFn: ({ pageParam }) =>
+      api.browseNarrators({ limit: PAGE_SIZE, cursor: pageParam as string | undefined }),
+    getNextPageParam: (last: PageEnvelope<NarratorSummary>) => last.next_cursor || undefined,
   });
   if (q.isLoading)
     return (
@@ -17,7 +24,7 @@ export default function Narrators() {
         ))}
       </div>
     );
-  const items = q.data?.items ?? [];
+  const items = q.data?.pages.flatMap((p) => p.items) ?? [];
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-semibold">Narrators</h2>
@@ -33,6 +40,12 @@ export default function Narrators() {
           </Link>
         ))}
       </div>
+      <InfiniteFooter
+        hasNextPage={q.hasNextPage}
+        isFetchingNextPage={q.isFetchingNextPage}
+        fetchNextPage={() => q.fetchNextPage()}
+        label="narrators"
+      />
     </div>
   );
 }

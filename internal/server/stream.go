@@ -37,5 +37,5 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "streaming router not initialised")
 		return
 	}
-	s.d.Streaming.Stream(w, r, id.Token, lib.BackendPluginID, bookID, idx)
+	s.d.Streaming.Stream(w, r, id.UserID, lib.BackendPluginID, bookID, idx)
 }

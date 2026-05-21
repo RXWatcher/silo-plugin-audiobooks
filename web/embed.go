@@ -29,12 +29,31 @@ func FS() http.FileSystem { return http.FS(FSEmbed()) }
 // SPAHandler returns an http.Handler that serves the embedded SPA. For paths
 // that don't match a real file, it serves index.html so client-side routing
 // works.
+//
+// Static-file content types are set explicitly because plugins run in a
+// minimal container with no /etc/mime.types — Go's mime database falls back
+// to text/plain for anything outside the small builtin table (notably
+// .webmanifest), and downstream the continuum proxy adds
+// X-Content-Type-Options: nosniff, so a wrong type makes the browser refuse
+// to register the service worker.
+var pwaContentTypes = map[string]string{
+	"/manifest.webmanifest": "application/manifest+json; charset=utf-8",
+	"/sw.js":                "application/javascript; charset=utf-8",
+	"/icon.svg":             "image/svg+xml",
+	"/icon-192.png":         "image/png",
+	"/icon-512.png":         "image/png",
+	"/apple-touch-icon.png": "image/png",
+}
+
 func SPAHandler() http.Handler {
 	fileSrv := http.FileServer(FS())
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSPARequest(r.URL.Path) {
 			serveIndex(w, r)
 			return
+		}
+		if ct, ok := pwaContentTypes[r.URL.Path]; ok {
+			w.Header().Set("Content-Type", ct)
 		}
 		f, err := FS().Open(r.URL.Path)
 		if err != nil {

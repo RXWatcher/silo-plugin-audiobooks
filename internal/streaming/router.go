@@ -1,123 +1,87 @@
-// Package streaming routes audio bytes to the client per the configured
-// streaming_mode: proxy | cache | direct.
+// Package streaming redirects audio byte requests to the configured backend
+// plugin's stream route. The portal mints a short-TTL signed JWT bound to
+// (user, book, file_idx, exp) and embeds it as ?token= on the redirect
+// target; the backend validates it without needing the host plugin proxy
+// to authenticate the byte route at all (the backend declares the route
+// public on its manifest).
+//
+// The cache and direct modes the package used to expose were removed: the
+// cache mode silently failed on real audiobook sizes (the host-proxy client
+// caps response bodies at 10 MiB), and the direct mode was a permanent stub.
+// A single proxy redirect is the only thing the contract needs.
 package streaming
 
 import (
-	"context"
-	"fmt"
-	"io"
+	"errors"
+	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
+	"net/url"
 	"strings"
 
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
-	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/store"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/mediatoken"
 )
 
-// Mode is the configured streaming mode.
-type Mode string
+// SecretProvider returns the current media signing secret. Implementations
+// typically read from the store on each call so admin updates take effect
+// without a plugin restart.
+type SecretProvider func() string
 
-const (
-	ModeProxy  Mode = "proxy"
-	ModeCache  Mode = "cache"
-	ModeDirect Mode = "direct"
-)
-
-// Router resolves the mode per request and dispatches.
+// Router builds the backend stream URL with a signed media token and writes
+// the redirect.
 type Router struct {
-	store   *store.Store
 	backend *backend.Client
-	cache   *Cache
+	secret  SecretProvider
 }
 
-// NewRouter builds a router; cache is optional (only used in cache mode).
-func NewRouter(s *store.Store, b *backend.Client, cache *Cache) *Router {
-	return &Router{store: s, backend: b, cache: cache}
+// NewRouter constructs a Router bound to the backend client. secret is
+// called on every Stream() to read the latest persisted signing secret.
+func NewRouter(b *backend.Client, secret SecretProvider) *Router {
+	return &Router{backend: b, secret: secret}
 }
 
-// Stream resolves the mode and writes the response.
-func (r *Router) Stream(w http.ResponseWriter, req *http.Request, bearer, installID, bookID string, fileIdx int) {
-	if r.store == nil || r.backend == nil {
+// Stream issues a 302 to the backend's stream URL with a signed ?token= so
+// the browser, following the redirect into <audio src>, carries auth to the
+// second hop — browsers don't send Authorization headers on tag-issued
+// requests. The token is bound to (userID, bookID, fileIdx, exp), so a
+// leaked URL stops working after the TTL and can't be reused for other
+// resources.
+func (r *Router) Stream(w http.ResponseWriter, req *http.Request, userID, installID, bookID string, fileIdx int) {
+	if r == nil || r.backend == nil {
 		http.Error(w, "streaming not configured", http.StatusInternalServerError)
 		return
 	}
-	cfg, err := r.store.GetBackendConfig(req.Context())
-	if err != nil {
-		http.Error(w, "backend config unavailable", http.StatusInternalServerError)
+	if installID == "" {
+		http.Error(w, "no backend configured", http.StatusPreconditionFailed)
 		return
 	}
-	mode := Mode(cfg.StreamingMode)
-	if mode == "" {
-		mode = ModeProxy
+	if r.secret == nil {
+		slog.Error("streaming secret provider not wired")
+		http.Error(w, "media signing not configured", http.StatusServiceUnavailable)
+		return
 	}
-	switch mode {
-	case ModeDirect:
-		r.serveDirect(w, req, bearer, installID, bookID, fileIdx, cfg)
-	case ModeCache:
-		if r.cache == nil {
-			http.Error(w, "cache mode not initialised", http.StatusInternalServerError)
+	secret := r.secret()
+	if secret == "" {
+		slog.Warn("media_signing_secret is empty; refusing to issue a tokenless redirect")
+		http.Error(w, "media signing not configured", http.StatusServiceUnavailable)
+		return
+	}
+	token, err := mediatoken.Mint(secret, userID, bookID, fileIdx)
+	if err != nil {
+		if errors.Is(err, mediatoken.ErrSecretUnconfigured) {
+			slog.Warn("media_signing_secret missing on mint", "book_id", bookID, "file_idx", fileIdx)
+			http.Error(w, "media signing not configured", http.StatusServiceUnavailable)
 			return
 		}
-		r.serveCache(w, req, bearer, installID, bookID, fileIdx)
-	default:
-		r.serveProxy(w, req, bearer, installID, bookID, fileIdx)
-	}
-}
-
-func (r *Router) serveProxy(w http.ResponseWriter, req *http.Request, bearer, installID, bookID string, fileIdx int) {
-	// Default proxy mode: just redirect the client to the public plugin URL.
-	// The host's plugin proxy will validate the bearer and forward to the
-	// backend, which 302s to the upstream stream URL.
-	upstreamURL := r.backend.StreamURL(installID, bookID, fileIdx)
-	http.Redirect(w, req, upstreamURL, http.StatusFound)
-}
-
-func (r *Router) serveDirect(w http.ResponseWriter, req *http.Request, bearer, installID, bookID string, fileIdx int, cfg store.BackendConfig) {
-	// Look up the file's filename via the backend, then map to a local path.
-	detail, err := r.backend.GetDetail(req.Context(), bearer, installID, bookID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		slog.Error("mint stream token failed", "book_id", bookID, "file_idx", fileIdx, "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if fileIdx < 0 || fileIdx >= len(detail.Files) {
-		http.Error(w, "file index out of range", http.StatusNotFound)
-		return
+	target := r.backend.StreamURL(installID, bookID, fileIdx)
+	sep := "?"
+	if strings.Contains(target, "?") {
+		sep = "&"
 	}
-	// The contract Files entries don't include filename — direct mode is
-	// only supported when the backend exposes filesystem paths via a custom
-	// out-of-band channel. For now this is a stub; future filesystem
-	// backends will need a path-aware extension. Return 501 with detail.
-	_ = detail
-	_ = cfg
-	http.Error(w, "direct mode requires filesystem-aware backend (not implemented yet)", http.StatusNotImplemented)
-}
-
-func (r *Router) serveCache(w http.ResponseWriter, req *http.Request, bearer, installID, bookID string, fileIdx int) {
-	key := fmt.Sprintf("%s:%d", bookID, fileIdx)
-	entry, err := r.cache.Get(req.Context(), key, func(ctx context.Context) (io.ReadCloser, string, int64, error) {
-		// Miss: fetch from backend via the host plugin proxy.
-		resp, err := r.backend.HostClient().Get(ctx, bearer, installID,
-			fmt.Sprintf("/api/v1/stream/%s/%d", bookID, fileIdx))
-		if err != nil {
-			return nil, "", 0, err
-		}
-		// The backend's /stream route returns 302 to upstream; HostClient
-		// follows redirects automatically and returns body bytes.
-		return io.NopCloser(strings.NewReader(string(resp))), "audio/mpeg", int64(len(resp)), nil
-	})
-	if err != nil {
-		// The host plugin-proxy client is buffered and capped at 10 MiB, so
-		// caching real audiobook files (tens of MB to GBs) always fails
-		// here. Rather than 502 the playback, degrade to proxy mode (a 302
-		// to the backend stream) which streams correctly without buffering.
-		r.serveProxy(w, req, bearer, installID, bookID, fileIdx)
-		return
-	}
-	defer entry.Close()
-	w.Header().Set("Content-Type", entry.MimeType)
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", entry.Size))
-	w.Header().Set("Accept-Ranges", "bytes")
-	http.ServeContent(w, req, filepath.Base(entry.Path), entry.ModTime, entry.File)
-	_ = os.Stat // keep import
+	target = target + sep + "token=" + url.QueryEscape(token)
+	http.Redirect(w, req, target, http.StatusFound)
 }

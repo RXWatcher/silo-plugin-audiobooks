@@ -14,7 +14,6 @@ import {
   Loader2,
   Pause,
   Play,
-  Square,
   X,
 } from 'lucide-react';
 import { api } from '@/api/client';
@@ -509,6 +508,90 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     };
   }, [playing, silenceTrim, speed]);
 
+  // MediaSession API — surface what's playing to the OS so the user sees
+  // lock-screen / notification / system media controls instead of needing to
+  // be on our tab to skip a chapter. Critical for the PWA story: when the
+  // portal is installed and the user is browsing another app, the platform
+  // media center is the only UI they have for our playback.
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    if (!audiobook) {
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.playbackState = 'none';
+      return;
+    }
+    navigator.mediaSession.metadata = new window.MediaMetadata({
+      title: activeChapter?.title || audiobook.title,
+      artist: (audiobook.authors || []).join(', '),
+      album: audiobook.title,
+      artwork: audiobook.cover_url
+        ? [
+            { src: audiobook.cover_url, sizes: '512x512', type: 'image/jpeg' },
+          ]
+        : [],
+    });
+    navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+  }, [audiobook, activeChapter, playing]);
+
+  // MediaSession action handlers — wired once per book change because they
+  // close over `seek`, `toggle`, and `skipSeconds`, which are stable
+  // references via useCallback (except when those values change). Browsers
+  // ignore handlers set on a metadata-less session, so binding here is fine.
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !audiobook) return;
+    const ms = navigator.mediaSession;
+    const setHandler = (
+      action: MediaSessionAction,
+      handler: MediaSessionActionHandler | null,
+    ) => {
+      try {
+        ms.setActionHandler(action, handler);
+      } catch {
+        // Some browsers throw on unsupported actions (e.g. seekto on older
+        // Safari). Swallow — the action just won't be wired.
+      }
+    };
+    setHandler('play', () => toggle());
+    setHandler('pause', () => toggle());
+    setHandler('seekbackward', (details) => {
+      const offset = details.seekOffset ?? skipSeconds;
+      seek(bookTimeRef.current - offset);
+    });
+    setHandler('seekforward', (details) => {
+      const offset = details.seekOffset ?? skipSeconds;
+      seek(bookTimeRef.current + offset);
+    });
+    setHandler('seekto', (details) => {
+      if (typeof details.seekTime === 'number') seek(details.seekTime);
+    });
+    setHandler('stop', () => {
+      stop();
+    });
+    return () => {
+      setHandler('play', null);
+      setHandler('pause', null);
+      setHandler('seekbackward', null);
+      setHandler('seekforward', null);
+      setHandler('seekto', null);
+      setHandler('stop', null);
+    };
+  }, [audiobook, toggle, seek, skipSeconds, stop]);
+
+  // Position state — lets the OS show a progress bar and tracks the current
+  // time accurately when the user scrubs from the system media center.
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !audiobook) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: Math.max(0, duration),
+        playbackRate: speed,
+        position: Math.max(0, Math.min(bookTime, duration)),
+      });
+    } catch {
+      // setPositionState rejects on stale values; ignored intentionally.
+    }
+  }, [audiobook, duration, bookTime, speed]);
+
   useEffect(() => {
     if (!audiobook || !activeFile) {
       setSourceUrl('');
@@ -519,13 +602,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     objectUrlRef.current = null;
     if (previous) URL.revokeObjectURL(previous);
 
+    // Look up the portal-signed file entry — stream_url carries the signed
+    // media token the backend requires on its public byte route.
+    const fileForStream = audiobook.files.find((f) => f.index === activeFile.fileIndex);
     if (sourceMode === 'download') {
       getOfflineBlob(audiobook.id, activeFile.fileIndex)
         .then((blob) => {
           if (cancelled) return;
           if (!blob) {
             setSourceMode('stream');
-            setSourceUrl(streamPlaybackSource.urlForFile(audiobook.id, activeFile.fileIndex));
+            if (fileForStream) setSourceUrl(streamPlaybackSource.urlForFile(fileForStream));
             return;
           }
           const url = URL.createObjectURL(blob);
@@ -535,11 +621,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         .catch(() => {
           if (!cancelled) {
             setSourceMode('stream');
-            setSourceUrl(streamPlaybackSource.urlForFile(audiobook.id, activeFile.fileIndex));
+            if (fileForStream) setSourceUrl(streamPlaybackSource.urlForFile(fileForStream));
           }
         });
-    } else {
-      setSourceUrl(streamPlaybackSource.urlForFile(audiobook.id, activeFile.fileIndex));
+    } else if (fileForStream) {
+      setSourceUrl(streamPlaybackSource.urlForFile(fileForStream));
     }
     return () => {
       cancelled = true;
@@ -557,7 +643,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         await downloadOfflineFile(
           audiobook.id,
           file.index,
-          streamPlaybackSource.urlForFile(audiobook.id, file.index),
+          streamPlaybackSource.urlForFile(file),
         );
         completed += 1;
         setDownloadProgress(completed / audiobook.files.length);
@@ -617,27 +703,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     document.addEventListener('visibilitychange', onHidden);
     return () => document.removeEventListener('visibilitychange', onHidden);
   }, [sync]);
-
-  useEffect(() => {
-    if (!audiobook || !('mediaSession' in navigator)) return;
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: audiobook.title,
-      artist: audiobook.authors?.join(', ') || audiobook.narrators?.join(', ') || '',
-      album: audiobook.series || '',
-      artwork: audiobook.cover_url ? [{ src: audiobook.cover_url }] : [],
-    });
-    navigator.mediaSession.setActionHandler('play', () => void audioRef.current?.play());
-    navigator.mediaSession.setActionHandler('pause', () => audioRef.current?.pause());
-    navigator.mediaSession.setActionHandler('seekbackward', () =>
-      seek(bookTimeRef.current - skipSeconds),
-    );
-    navigator.mediaSession.setActionHandler('seekforward', () =>
-      seek(bookTimeRef.current + skipSeconds),
-    );
-    navigator.mediaSession.setActionHandler('seekto', (details) => {
-      if (details.seekTime != null) seek(details.seekTime);
-    });
-  }, [audiobook, seek, skipSeconds]);
 
   useEffect(() => {
     return () => {
@@ -738,7 +803,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       {activeFile && audiobook ? (
         <audio
           ref={audioRef}
-          src={sourceUrl || streamPlaybackSource.urlForFile(audiobook.id, activeFile.fileIndex)}
+          src={sourceUrl || streamPlaybackSource.urlForFile(audiobook.files.find((f) => f.index === activeFile.fileIndex) ?? audiobook.files[0])}
           preload="metadata"
           onLoadedMetadata={(event) => {
             const audio = event.currentTarget;
@@ -835,10 +900,15 @@ function MiniPlayer() {
         <Button size="icon-sm" onClick={playback.toggle} aria-label={playback.playing ? 'Pause' : 'Play'}>
           {playback.playing ? <Pause className="size-4" /> : <Play className="size-4" />}
         </Button>
-        <Button size="icon-sm" variant="ghost" onClick={playback.stop} aria-label="Stop playback">
-          <Square className="size-4" />
-        </Button>
-        <Button size="icon-sm" variant="ghost" onClick={playback.stop} aria-label="Dismiss player">
+        {/*
+          One destructive action only — the previous version shipped both a
+          stop button (Square) and a close X that *also* called stop(),
+          conflating "minimize the UI" with "end my listening session". Now
+          there's just one button labelled clearly so users don't accidentally
+          throw away their playback position. A future minimize gesture would
+          be a separate state, not another path to stop().
+        */}
+        <Button size="icon-sm" variant="ghost" onClick={playback.stop} aria-label="Stop and close player">
           <X className="size-4" />
         </Button>
       </div>

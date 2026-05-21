@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { captureFromURL, getCachedToken, getCachedTheme, _resetForTest } from './auth';
+import { captureFromURL, getCachedToken, getCachedTheme, setCachedToken, _resetForTest } from './auth';
 
 describe('captureFromURL', () => {
   beforeEach(() => {
@@ -27,5 +27,11 @@ describe('captureFromURL', () => {
   it('returns null when neither token nor theme is provided', () => {
     captureFromURL(new URLSearchParams());
     expect(getCachedToken()).toBeNull();
+  });
+
+  it('allows the client to replace the cached token after refresh', () => {
+    captureFromURL(new URLSearchParams('?token=abc123'));
+    setCachedToken('fresh-token');
+    expect(getCachedToken()).toBe('fresh-token');
   });
 });

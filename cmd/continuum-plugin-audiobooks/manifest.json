@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "checksum": "__CHECKSUM__",
   "continuum_api_version": "v1",
+  "category": "Books/Audiobooks",
   "supported_platforms": [
     {
       "os": "linux",
@@ -38,7 +39,13 @@
       "type": "scheduled_task.v1",
       "id": "request_reconciler",
       "display_name": "Audiobook request reconciler",
-      "description": "Polls backend for missed status events; closes idle ABS sessions; LRU-evicts cached audio."
+      "description": "Polls backend for missed status events and closes idle ABS playback sessions."
+    },
+    {
+      "type": "scheduled_task.v1",
+      "id": "portal_library_sync",
+      "display_name": "Sync presentation libraries from backend",
+      "cron": "0 * * * *"
     }
   ],
   "http_routes": [

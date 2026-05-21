@@ -14,7 +14,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { BackendConfig, InstalledBackend, LibraryInfo } from '@/api/types';
+import type {
+  BackendConfig,
+  InstalledBackend,
+  LibraryInfo,
+  StandaloneLoginMode,
+} from '@/api/types';
+import { STANDALONE_LOGIN_MODES } from '@/api/types';
+
+const STANDALONE_LOGIN_MODE_LABELS: Record<StandaloneLoginMode, string> = {
+  disabled: 'Disabled (host-proxied login only)',
+  opt_in: 'Opt-in (each listener enables it from their account)',
+  all_accounts: 'All accounts with a local password',
+};
+
+const STANDALONE_LOGIN_MODE_DESCRIPTION =
+  'Controls whether the standalone listener accepts username + password from Audiobookshelf clients. ' +
+  'Listeners without a local password on the Continuum host always fail closed regardless of mode.';
 
 const MODES = ['proxy', 'cache', 'direct'] as const;
 const MEDIA_TYPES = ['audiobook', 'podcast', 'audio drama', 'lecture'] as const;
@@ -184,6 +200,23 @@ export default function AdminSettings() {
               onChange={(e) => update('standalone_http_listen', e.target.value)}
               placeholder="127.0.0.1:9999"
             />
+          </Field>
+          <Field label="Mobile-app login" description={STANDALONE_LOGIN_MODE_DESCRIPTION}>
+            <Select
+              value={form.standalone_login_mode ?? 'disabled'}
+              onValueChange={(v) => update('standalone_login_mode', v as StandaloneLoginMode)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STANDALONE_LOGIN_MODES.map((mode) => (
+                  <SelectItem key={mode} value={mode}>
+                    {STANDALONE_LOGIN_MODE_LABELS[mode]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
           <Button
             type="button"
@@ -372,10 +405,23 @@ function normalizeLibraries(items: LibraryInfo[]): LibraryInfo[] {
   }));
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+  description,
+}: {
+  label: string;
+  children: React.ReactNode;
+  description?: string;
+}) {
   return (
-    <div className="grid gap-2 sm:grid-cols-3 sm:items-center">
-      <Label className="sm:col-span-1">{label}</Label>
+    <div className="grid gap-2 sm:grid-cols-3 sm:items-start">
+      <div className="sm:col-span-1">
+        <Label>{label}</Label>
+        {description ? (
+          <p className="text-muted-foreground mt-1 text-xs">{description}</p>
+        ) : null}
+      </div>
       <div className="sm:col-span-2">{children}</div>
     </div>
   );

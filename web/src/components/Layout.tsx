@@ -1,11 +1,9 @@
 import { Outlet, NavLink, useLocation } from 'react-router';
-import { ArrowLeft, BookHeadphones, Layers, Library, Smartphone, ListChecks, Settings } from 'lucide-react';
+import { ArrowLeft, BookHeadphones, Home as HomeIcon, Layers, Library, Smartphone, ListChecks, Users, Mic } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { isAdmin } from '@/lib/identity';
 
 export default function Layout() {
   const loc = useLocation();
-  const admin = isAdmin();
   const isAdminRoute = loc.pathname.startsWith('/admin');
   const backToContinuumHref = isAdminRoute ? '/admin/plugins' : '/';
   const backToContinuumTitle = isAdminRoute ? 'Back to Continuum plugins' : 'Back to Continuum';
@@ -33,14 +31,20 @@ export default function Layout() {
           </h1>
         </div>
         <nav className="flex items-center gap-1">
-          <NavItem to="/" icon={<Library className="size-4" />} label="Home" exact />
+          <NavItem to="/" icon={<HomeIcon className="size-4" />} label="Home" exact />
+          <NavItem to="/library" icon={<Library className="size-4" />} label="Library" />
+          <NavItem to="/authors" icon={<Users className="size-4" />} label="Authors" />
           <NavItem to="/series" icon={<Layers className="size-4" />} label="Series" />
+          <NavItem to="/narrators" icon={<Mic className="size-4" />} label="Narrators" />
           <NavItem to="/collections" icon={<ListChecks className="size-4" />} label="Collections" />
           <NavItem to="/me/requests" icon={<ListChecks className="size-4" />} label="My Requests" />
           <NavItem to="/apps" icon={<Smartphone className="size-4" />} label="Apps" />
-          {admin && (
-            <NavItem to="/admin" icon={<Settings className="size-4" />} label="Admin" />
-          )}
+          {/*
+            No "Admin" tab here. The user portal is strictly user-facing;
+            admins reach the plugin's admin UI via the continuum host
+            sidebar (Apps → Books → Audiobooks → [admin]). Mixing the two
+            surfaces in this nav blurred the audience.
+          */}
         </nav>
       </header>
 

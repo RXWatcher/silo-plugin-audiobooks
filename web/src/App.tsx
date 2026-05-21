@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router';
 import Layout from '@/components/Layout';
 import Home from '@/pages/Home';
+import Library from '@/pages/Library';
 import Detail from '@/pages/Detail';
 import Series from '@/pages/Series';
 import SeriesDetail from '@/pages/SeriesDetail';
@@ -12,11 +13,7 @@ import Collections from '@/pages/Collections';
 import CollectionDetail from '@/pages/CollectionDetail';
 import Apps from '@/pages/Apps';
 import MyRequests from '@/pages/MyRequests';
-import AdminRequests from '@/pages/admin/Requests';
-import AdminRequestDetail from '@/pages/admin/RequestDetail';
-import AdminSettings from '@/pages/admin/Settings';
-import AdminSessions from '@/pages/admin/Sessions';
-import AdminTokens from '@/pages/admin/Tokens';
+import Admin from '@/pages/admin/Admin';
 import { Toaster } from '@/components/ui/sonner';
 import { PlaybackProvider } from '@/player/PlaybackProvider';
 
@@ -24,8 +21,26 @@ export default function App() {
   return (
     <PlaybackProvider>
       <Routes>
+        <Route
+          path="/admin"
+          element={
+            <main className="min-h-[100dvh] bg-background text-foreground">
+              <div className="mx-auto max-w-[1600px] space-y-6 px-4 py-6 md:px-6 lg:px-8">
+                <a
+                  href="/admin/plugins"
+                  className="text-muted-foreground hover:bg-surface-hover hover:text-foreground inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors"
+                  title="Back to Continuum plugins"
+                >
+                  Back to Continuum plugins
+                </a>
+                <Admin />
+              </div>
+            </main>
+          }
+        />
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
+          <Route path="/library" element={<Library />} />
           <Route path="/audiobook/:id" element={<Detail />} />
           <Route path="/series" element={<Series />} />
           <Route path="/series/:id" element={<SeriesDetail />} />
@@ -37,11 +52,10 @@ export default function App() {
           <Route path="/collections/:id" element={<CollectionDetail />} />
           <Route path="/apps" element={<Apps />} />
           <Route path="/me/requests" element={<MyRequests />} />
-          <Route path="/admin" element={<AdminRequests />} />
-          <Route path="/admin/requests/:id" element={<AdminRequestDetail />} />
-          <Route path="/admin/settings" element={<AdminSettings />} />
-          <Route path="/admin/sessions" element={<AdminSessions />} />
-          <Route path="/admin/tokens" element={<AdminTokens />} />
+          <Route path="/admin/requests/:id" element={<Navigate to="/admin" replace />} />
+          <Route path="/admin/settings" element={<Navigate to="/admin" replace />} />
+          <Route path="/admin/sessions" element={<Navigate to="/admin" replace />} />
+          <Route path="/admin/tokens" element={<Navigate to="/admin" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

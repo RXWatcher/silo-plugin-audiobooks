@@ -1,7 +1,8 @@
 import { mountPath } from '@/lib/mountPath';
-import { getCachedToken } from '@/lib/auth';
+import { getCachedToken, setCachedToken } from '@/lib/auth';
 import type {
   ABSSession,
+  ABSStandaloneOptInState,
   ABSToken,
   AudiobookDetail,
   AudiobookSummary,
@@ -32,12 +33,87 @@ function authHeaders(): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+let refreshPromise: Promise<string | null> | null = null;
+
+// refreshAccessToken posts to the Continuum host's `/api/v1/auth/refresh`
+// (NOT a plugin-mounted route — the host owns session lifetime). It's
+// intentionally hardcoded without `mountPath()` because the SPA is served
+// from the host origin and refresh lives at host root.
+//
+// Currently dead in production: this function reads `refresh_token` from
+// localStorage, but nothing in this SPA ever writes it — the plugin proxy
+// hands the SPA an `?token=` access token only, and refresh tokens live on
+// the host SPA's session storage. When the access token expires, the user
+// reloads via the host sidebar to get a fresh one. The code is kept here so
+// the retry path is wired when the host eventually issues refresh tokens
+// directly to plugin SPAs.
+async function refreshAccessToken(): Promise<string | null> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = (async () => {
+    let refreshToken: string | null = null;
+    try {
+      refreshToken = window.localStorage.getItem('refresh_token');
+    } catch {
+      return null;
+    }
+
+    if (!refreshToken) {
+      return null;
+    }
+
+    const response = await fetch('/api/v1/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    setCachedToken(data.access_token ?? null);
+    if (data.refresh_token) {
+      try {
+        window.localStorage.setItem('refresh_token', data.refresh_token);
+      } catch {
+        // Storage may be unavailable; keep using the in-memory access token.
+      }
+    }
+    return getCachedToken();
+  })().finally(() => {
+    refreshPromise = null;
+  });
+
+  return refreshPromise;
+}
+
 export async function authedFetch(input: string, init?: RequestInit): Promise<Response> {
   const headers = {
     ...(init?.headers as Record<string, string> | undefined),
     ...authHeaders(),
   };
-  return fetch(input, { ...init, headers });
+  let res = await fetch(input, { ...init, headers, credentials: init?.credentials ?? 'include' });
+  if (res.status !== 401) {
+    return res;
+  }
+
+  const freshToken = await refreshAccessToken();
+  if (!freshToken) {
+    return res;
+  }
+
+  return fetch(input, {
+    ...init,
+    headers: {
+      ...(init?.headers as Record<string, string> | undefined),
+      Authorization: `Bearer ${freshToken}`,
+    },
+    credentials: init?.credentials ?? 'include',
+  });
 }
 
 async function jsonOrThrow<T>(r: Response): Promise<T> {
@@ -121,6 +197,13 @@ export const api = {
       jsonOrThrow<PageEnvelope<NarratorSummary>>,
     ),
 
+  // streamUrl was previously used by the player to construct an authenticated
+  // URL client-side. With signed URLs, each AudiobookFile in the detail
+  // response carries its own stream_url (portal-signed, short-TTL); the
+  // player reads file.stream_url directly. This helper remains only for
+  // back-compat with code paths that still want the portal redirect (e.g.
+  // older mobile clients) — it does not embed any auth, so callers must
+  // either authenticate via Bearer header or use file.stream_url instead.
   streamUrl: (bookId: string, fileIdx: number) =>
     `${apiBase()}/audiobooks/${encodeURIComponent(bookId)}/files/${fileIdx}/stream`,
 
@@ -285,6 +368,20 @@ export const api = {
       { method: 'DELETE' },
     ).then(noContentOrThrow),
 
+  // ABS standalone-port body-creds login opt-in (per user).
+  getABSStandaloneOptIn: () =>
+    authedFetch(`${apiBase()}/me/abs-standalone`).then(jsonOrThrow<ABSStandaloneOptInState>),
+
+  enableABSStandaloneOptIn: () =>
+    authedFetch(`${apiBase()}/me/abs-standalone`, { method: 'POST' }).then(
+      jsonOrThrow<{ enabled: boolean }>,
+    ),
+
+  disableABSStandaloneOptIn: () =>
+    authedFetch(`${apiBase()}/me/abs-standalone`, { method: 'DELETE' }).then(
+      jsonOrThrow<{ enabled: boolean }>,
+    ),
+
   // Admin
   getBackendConfig: () =>
     authedFetch(`${apiBase()}/admin/backend-config`).then(jsonOrThrow<BackendConfig>),
@@ -310,6 +407,19 @@ export const api = {
     authedFetch(
       `${apiBase()}/admin/backend-libraries?backend_plugin_id=${encodeURIComponent(backendPluginID)}`,
     ).then(jsonOrThrow<{ items: LibraryInfo[] }>),
+
+  adminSyncLibraries: (backendPluginID: string) =>
+    authedFetch(
+      `${apiBase()}/admin/libraries/sync?backend_plugin_id=${encodeURIComponent(backendPluginID)}`,
+      { method: 'POST' },
+    ).then(
+      jsonOrThrow<{
+        created: number;
+        updated: number;
+        pruned: number;
+        kept: number;
+      }>,
+    ),
 
   adminListRequests: (status: string) =>
     authedFetch(`${apiBase()}/admin/requests?status=${encodeURIComponent(status)}`).then(
@@ -353,12 +463,27 @@ function audiobookBackendCapability(capabilities: InstalledCapability[]): Instal
   return capabilities.find((cap) => cap.type === 'audiobook_backend.v1');
 }
 
-export async function fetchInstalledBackends(): Promise<InstalledBackend[]> {
-  const res = await fetch('/api/v1/admin/plugins/installations', {
-    headers: authHeaders(),
-    credentials: 'include',
-  });
-  if (!res.ok) return [];
+function audiobookRoles(capability?: InstalledCapability): string[] {
+  const roles = capability?.metadata?.audiobook_roles;
+  return Array.isArray(roles)
+    ? roles.filter((role): role is string => typeof role === 'string')
+    : [];
+}
+
+function hasAudiobookRole(plugin: InstalledBackend, role: string): boolean {
+  return plugin.audiobook_roles.includes(role);
+}
+
+async function fetchInstalledAudiobookPlugins(): Promise<InstalledBackend[]> {
+  const res = await authedFetch('/api/v1/admin/plugins/installations');
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(
+      `Could not load installed backends (HTTP ${res.status})${
+        detail ? `: ${detail.slice(0, 200)}` : ''
+      }`,
+    );
+  }
   const body = await res.json();
   const installations = Array.isArray(body) ? body : body.installations || [];
   return installations
@@ -383,6 +508,7 @@ export async function fetchInstalledBackends(): Promise<InstalledBackend[]> {
           enabled: i.enabled,
           capabilities,
           audiobook_backend: audiobookBackend,
+          audiobook_roles: audiobookRoles(audiobookBackend),
           display_name:
             audiobookBackend?.display_name ||
             i.display_name ||
@@ -392,4 +518,27 @@ export async function fetchInstalledBackends(): Promise<InstalledBackend[]> {
         };
       },
     );
+}
+
+export async function fetchInstalledBackends(): Promise<InstalledBackend[]> {
+  const plugins = await fetchInstalledAudiobookPlugins();
+  return plugins.filter((plugin) => {
+    if (hasAudiobookRole(plugin, 'library_source')) {
+      return true;
+    }
+    if (plugin.audiobook_roles.length > 0) {
+      return false;
+    }
+    return plugin.audiobook_backend?.metadata?.supports_catalog !== false;
+  });
+}
+
+export async function fetchRequestProviders(): Promise<InstalledBackend[]> {
+  const plugins = await fetchInstalledAudiobookPlugins();
+  return plugins.filter((plugin) => {
+    if (hasAudiobookRole(plugin, 'request_provider')) {
+      return true;
+    }
+    return plugin.audiobook_backend?.metadata?.supports_catalog === false;
+  });
 }

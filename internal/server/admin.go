@@ -9,6 +9,7 @@ import (
 
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/auth"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/libsync"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/store"
 )
 
@@ -20,6 +21,7 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Get("/admin/libraries", s.handleAdminListLibraries)
 	r.Put("/admin/libraries", s.handleAdminReplaceLibraries)
 	r.Get("/admin/backend-libraries", s.handleAdminBackendLibraries)
+	r.Post("/admin/libraries/sync", s.handleAdminSyncLibraries)
 	r.Get("/admin/requests", s.handleAdminListRequests)
 	r.Post("/admin/requests/{id}/approve", s.handleAdminApproveRequest)
 	r.Post("/admin/requests/{id}/deny", s.handleAdminDenyRequest)
@@ -47,33 +49,29 @@ func (s *Server) handleGetBackendConfig(w http.ResponseWriter, r *http.Request) 
 		"target_request_provider_plugin_id":       cfg.TargetRequestPluginID,
 		"target_request_provider_installation_id": cfg.TargetRequestInstallID,
 		"auto_approve_requests":                   cfg.AutoApproveRequests,
-		"streaming_mode":                          cfg.StreamingMode,
-		"cache_dir":                               cfg.CacheDir,
-		"cache_max_size_gb":                       cfg.CacheMaxSizeGB,
-		"cache_download_concurrency":              cfg.CacheDownloadConcurrency,
-		"path_remappings":                         cfg.PathRemappings,
 		"abs_access_token_ttl_hours":              cfg.ABSAccessTTLHours,
 		"abs_refresh_token_ttl_days":              cfg.ABSRefreshTTLDays,
 		"standalone_http_listen":                  cfg.StandaloneHTTPListen,
-		"libraries":                               libs,
+		"standalone_login_mode":                   store.NormalizeStandaloneLoginMode(cfg.StandaloneLoginMode),
+		// media_signing_secret_set lets the admin UI show whether the secret
+		// is configured without leaking the value over the wire.
+		"media_signing_secret_set": cfg.MediaSigningSecret != "",
+		"libraries":                libs,
 	})
 }
 
 type backendConfigPayload struct {
-	TargetBackendPluginID    *string            `json:"target_backend_plugin_id"`
-	TargetBackendInstallID   *string            `json:"target_backend_installation_id"`
-	TargetRequestPluginID    *string            `json:"target_request_provider_plugin_id"`
-	TargetRequestInstallID   *string            `json:"target_request_provider_installation_id"`
-	AutoApproveRequests      *bool              `json:"auto_approve_requests"`
-	StreamingMode            *string            `json:"streaming_mode"`
-	CacheDir                 *string            `json:"cache_dir"`
-	CacheMaxSizeGB           *int               `json:"cache_max_size_gb"`
-	CacheDownloadConcurrency *int               `json:"cache_download_concurrency"`
-	PathRemappings           *[]store.PathRemap `json:"path_remappings"`
-	ABSAccessTTLHours        *int               `json:"abs_access_token_ttl_hours"`
-	ABSRefreshTTLDays        *int               `json:"abs_refresh_token_ttl_days"`
-	StandaloneHTTPListen     *string            `json:"standalone_http_listen"`
-	RotateABSSecret          bool               `json:"rotate_abs_secret"`
+	TargetBackendPluginID  *string `json:"target_backend_plugin_id"`
+	TargetBackendInstallID *string `json:"target_backend_installation_id"`
+	TargetRequestPluginID  *string `json:"target_request_provider_plugin_id"`
+	TargetRequestInstallID *string `json:"target_request_provider_installation_id"`
+	AutoApproveRequests    *bool   `json:"auto_approve_requests"`
+	ABSAccessTTLHours      *int    `json:"abs_access_token_ttl_hours"`
+	ABSRefreshTTLDays      *int    `json:"abs_refresh_token_ttl_days"`
+	StandaloneHTTPListen   *string `json:"standalone_http_listen"`
+	StandaloneLoginMode    *string `json:"standalone_login_mode"`
+	MediaSigningSecret     *string `json:"media_signing_secret"`
+	RotateABSSecret        bool    `json:"rotate_abs_secret"`
 }
 
 func (s *Server) handleUpdateBackendConfig(w http.ResponseWriter, r *http.Request) {
@@ -105,21 +103,6 @@ func (s *Server) handleUpdateBackendConfig(w http.ResponseWriter, r *http.Reques
 	if p.AutoApproveRequests != nil {
 		cur.AutoApproveRequests = *p.AutoApproveRequests
 	}
-	if p.StreamingMode != nil {
-		cur.StreamingMode = *p.StreamingMode
-	}
-	if p.CacheDir != nil {
-		cur.CacheDir = *p.CacheDir
-	}
-	if p.CacheMaxSizeGB != nil {
-		cur.CacheMaxSizeGB = *p.CacheMaxSizeGB
-	}
-	if p.CacheDownloadConcurrency != nil {
-		cur.CacheDownloadConcurrency = *p.CacheDownloadConcurrency
-	}
-	if p.PathRemappings != nil {
-		cur.PathRemappings = *p.PathRemappings
-	}
 	if p.ABSAccessTTLHours != nil {
 		cur.ABSAccessTTLHours = *p.ABSAccessTTLHours
 	}
@@ -128,6 +111,17 @@ func (s *Server) handleUpdateBackendConfig(w http.ResponseWriter, r *http.Reques
 	}
 	if p.StandaloneHTTPListen != nil {
 		cur.StandaloneHTTPListen = *p.StandaloneHTTPListen
+	}
+	if p.StandaloneLoginMode != nil {
+		mode := store.NormalizeStandaloneLoginMode(*p.StandaloneLoginMode)
+		if mode != *p.StandaloneLoginMode {
+			writeError(w, http.StatusBadRequest, "invalid standalone_login_mode")
+			return
+		}
+		cur.StandaloneLoginMode = mode
+	}
+	if p.MediaSigningSecret != nil {
+		cur.MediaSigningSecret = *p.MediaSigningSecret
 	}
 	if p.RotateABSSecret {
 		secret, err := randomBytes(32)
@@ -191,6 +185,33 @@ func (s *Server) handleAdminBackendLibraries(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) handleAdminSyncLibraries(w http.ResponseWriter, r *http.Request) {
+	id, ok := auth.RequireAdmin(w, r)
+	if !ok {
+		return
+	}
+	backendID := r.URL.Query().Get("backend_plugin_id")
+	if backendID == "" {
+		writeError(w, http.StatusBadRequest, "backend_plugin_id required")
+		return
+	}
+	if s.d.Backend == nil {
+		writeError(w, http.StatusBadGateway, "backend unavailable")
+		return
+	}
+	stats, err := libsync.Sync(r.Context(), s.d.Store, s.d.Backend, id.Token, backendID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"created": stats.Created,
+		"updated": stats.Updated,
+		"pruned":  stats.Pruned,
+		"kept":    stats.Kept,
+	})
 }
 
 func (s *Server) handleAdminListRequests(w http.ResponseWriter, r *http.Request) {

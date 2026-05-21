@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -12,29 +11,48 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// PathRemap represents a single source→target rewrite rule for direct mode.
-type PathRemap struct {
-	SourcePath string `json:"source_path"`
-	TargetPath string `json:"target_path"`
+// StandaloneLoginMode controls the standalone-port `/abs/api/login` body-creds
+// fallback. See docs/2026-05-21-standalone-abs-login.md.
+const (
+	StandaloneLoginModeDisabled    = "disabled"
+	StandaloneLoginModeOptIn       = "opt_in"
+	StandaloneLoginModeAllAccounts = "all_accounts"
+)
+
+// NormalizeStandaloneLoginMode coerces unknown / empty values to "disabled" so
+// the handler never has to special-case migration-era rows.
+func NormalizeStandaloneLoginMode(v string) string {
+	switch v {
+	case StandaloneLoginModeOptIn, StandaloneLoginModeAllAccounts:
+		return v
+	default:
+		return StandaloneLoginModeDisabled
+	}
 }
 
-// BackendConfig is the singleton row in backend_config (id=1).
+// BackendConfig is the singleton row in backend_config (id=1). The portal no
+// longer owns streaming/caching knobs — backend plugins serve bytes from
+// their own filesystem mounts. Fields removed (still present as unused DB
+// columns until a future migration drops them): streaming_mode, cache_dir,
+// cache_max_size_gb, cache_download_concurrency, path_remappings.
 type BackendConfig struct {
-	TargetBackendPluginID    string
-	TargetBackendInstallID   string
-	TargetRequestPluginID    string
-	TargetRequestInstallID   string
-	AutoApproveRequests      bool
-	StreamingMode            string
-	CacheDir                 string
-	CacheMaxSizeGB           int
-	CacheDownloadConcurrency int
-	PathRemappings           []PathRemap
-	ABSJWTSecret             []byte
-	ABSAccessTTLHours        int
-	ABSRefreshTTLDays        int
-	StandaloneHTTPListen     string
-	UpdatedAt                time.Time
+	TargetBackendPluginID  string
+	TargetBackendInstallID string
+	TargetRequestPluginID  string
+	TargetRequestInstallID string
+	AutoApproveRequests    bool
+	ABSJWTSecret           []byte
+	ABSAccessTTLHours      int
+	ABSRefreshTTLDays      int
+	StandaloneHTTPListen   string
+	// StandaloneLoginMode is one of the StandaloneLoginMode* constants.
+	StandaloneLoginMode string
+	// MediaSigningSecret is the HMAC key the portal signs media URL tokens
+	// with. Backend plugins (bw-audio, local-audiobooks) must hold the same
+	// secret in their stream_signing_secret field. Stored as base64 in the
+	// DB; the portal/back end accept both base64 and raw bytes at verify time.
+	MediaSigningSecret string
+	UpdatedAt          time.Time
 }
 
 type LegacyBackendConfig struct {
@@ -97,32 +115,27 @@ func (s *Store) GetBackendConfig(ctx context.Context) (BackendConfig, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT target_backend_plugin_id, target_backend_installation_id,
 		       target_request_provider_plugin_id, target_request_provider_installation_id,
-		       auto_approve_requests, streaming_mode,
-		       COALESCE(cache_dir,''), cache_max_size_gb, cache_download_concurrency,
-		       path_remappings, abs_jwt_secret,
+		       auto_approve_requests, abs_jwt_secret,
 		       abs_access_token_ttl_hours, abs_refresh_token_ttl_days,
-		       COALESCE(standalone_http_listen,''), updated_at
+		       COALESCE(standalone_http_listen,''), COALESCE(standalone_login_mode,''),
+		       COALESCE(media_signing_secret,''), updated_at
 		FROM backend_config WHERE id = 1
 	`)
 	var cfg BackendConfig
-	var remapsJSON []byte
 	if err := row.Scan(
 		&cfg.TargetBackendPluginID, &cfg.TargetBackendInstallID,
 		&cfg.TargetRequestPluginID, &cfg.TargetRequestInstallID,
-		&cfg.AutoApproveRequests, &cfg.StreamingMode,
-		&cfg.CacheDir, &cfg.CacheMaxSizeGB, &cfg.CacheDownloadConcurrency,
-		&remapsJSON, &cfg.ABSJWTSecret,
+		&cfg.AutoApproveRequests, &cfg.ABSJWTSecret,
 		&cfg.ABSAccessTTLHours, &cfg.ABSRefreshTTLDays,
-		&cfg.StandaloneHTTPListen, &cfg.UpdatedAt,
+		&cfg.StandaloneHTTPListen, &cfg.StandaloneLoginMode,
+		&cfg.MediaSigningSecret, &cfg.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return BackendConfig{}, ErrNotFound
 		}
 		return BackendConfig{}, fmt.Errorf("get backend_config: %w", err)
 	}
-	if len(remapsJSON) > 0 {
-		_ = json.Unmarshal(remapsJSON, &cfg.PathRemappings)
-	}
+	cfg.StandaloneLoginMode = NormalizeStandaloneLoginMode(cfg.StandaloneLoginMode)
 	return cfg, nil
 }
 
@@ -130,55 +143,48 @@ func (s *Store) GetBackendConfig(ctx context.Context) (BackendConfig, error) {
 // and the provided ABS JWT secret. Returns the resulting config.
 func (s *Store) EnsureBackendConfig(ctx context.Context, defaultSecret []byte) (BackendConfig, error) {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO backend_config (id, abs_jwt_secret) VALUES (1, $1)
+		INSERT INTO backend_config (id, abs_jwt_secret, standalone_http_listen) VALUES (1, $1, $2)
 		ON CONFLICT (id) DO NOTHING
-	`, defaultSecret)
+	`, defaultSecret, defaultBackendConfigShape().StandaloneHTTPListen)
 	if err != nil {
 		return BackendConfig{}, fmt.Errorf("ensure backend_config: %w", err)
 	}
 	return s.GetBackendConfig(ctx)
 }
 
-// UpdateBackendConfig writes the supplied non-zero fields atomically. Fields
-// passed as their zero values are not modified — this matches the form's
-// patch-style admin behaviour.
+// UpdateBackendConfig writes the supplied fields atomically. The legacy
+// streaming/cache/path_remappings columns are still in the table for back-
+// compat with the schema; they're never read or written by this code.
 func (s *Store) UpdateBackendConfig(ctx context.Context, cfg BackendConfig) error {
-	remaps, err := json.Marshal(cfg.PathRemappings)
-	if err != nil {
-		return fmt.Errorf("encode path_remappings: %w", err)
-	}
-	_, err = s.pool.Exec(ctx, `
+	_, err := s.pool.Exec(ctx, `
 		INSERT INTO backend_config
 			(id, target_backend_plugin_id, target_backend_installation_id,
 			 target_request_provider_plugin_id, target_request_provider_installation_id,
-			 auto_approve_requests, streaming_mode,
-			 cache_dir, cache_max_size_gb, cache_download_concurrency, path_remappings,
+			 auto_approve_requests,
 			 abs_jwt_secret, abs_access_token_ttl_hours, abs_refresh_token_ttl_days,
-			 standalone_http_listen, updated_at)
-		VALUES (1, $1, $2, $3, $4, $5, $6, NULLIF($7,''), $8, $9, $10, $11, $12, $13, NULLIF($14,''), now())
+			 standalone_http_listen, standalone_login_mode,
+			 media_signing_secret, updated_at)
+		VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9,''), $10, NULLIF($11,''), now())
 		ON CONFLICT (id) DO UPDATE SET
 			target_backend_plugin_id    = EXCLUDED.target_backend_plugin_id,
 			target_backend_installation_id = EXCLUDED.target_backend_installation_id,
 			target_request_provider_plugin_id = EXCLUDED.target_request_provider_plugin_id,
 			target_request_provider_installation_id = EXCLUDED.target_request_provider_installation_id,
 			auto_approve_requests       = EXCLUDED.auto_approve_requests,
-			streaming_mode              = EXCLUDED.streaming_mode,
-			cache_dir                   = COALESCE(EXCLUDED.cache_dir, backend_config.cache_dir),
-			cache_max_size_gb           = EXCLUDED.cache_max_size_gb,
-			cache_download_concurrency  = EXCLUDED.cache_download_concurrency,
-			path_remappings             = EXCLUDED.path_remappings,
 			abs_jwt_secret              = COALESCE(EXCLUDED.abs_jwt_secret, backend_config.abs_jwt_secret),
 			abs_access_token_ttl_hours  = EXCLUDED.abs_access_token_ttl_hours,
 			abs_refresh_token_ttl_days  = EXCLUDED.abs_refresh_token_ttl_days,
 			standalone_http_listen      = EXCLUDED.standalone_http_listen,
+			standalone_login_mode       = EXCLUDED.standalone_login_mode,
+			media_signing_secret        = COALESCE(EXCLUDED.media_signing_secret, backend_config.media_signing_secret),
 			updated_at                  = now()
 	`,
 		cfg.TargetBackendPluginID, cfg.TargetBackendInstallID,
 		cfg.TargetRequestPluginID, cfg.TargetRequestInstallID,
-		cfg.AutoApproveRequests, cfg.StreamingMode,
-		cfg.CacheDir, cfg.CacheMaxSizeGB, cfg.CacheDownloadConcurrency, remaps,
+		cfg.AutoApproveRequests,
 		cfg.ABSJWTSecret, cfg.ABSAccessTTLHours, cfg.ABSRefreshTTLDays,
-		cfg.StandaloneHTTPListen,
+		cfg.StandaloneHTTPListen, NormalizeStandaloneLoginMode(cfg.StandaloneLoginMode),
+		cfg.MediaSigningSecret,
 	)
 	if err != nil {
 		return fmt.Errorf("update backend_config: %w", err)
@@ -207,11 +213,10 @@ func (s *Store) ImportLegacyBackendConfig(ctx context.Context, legacy LegacyBack
 
 func defaultBackendConfigShape() BackendConfig {
 	return BackendConfig{
-		StreamingMode:            "proxy",
-		CacheMaxSizeGB:           50,
-		CacheDownloadConcurrency: 2,
-		ABSAccessTTLHours:        24,
-		ABSRefreshTTLDays:        30,
+		ABSAccessTTLHours:    24,
+		ABSRefreshTTLDays:    30,
+		StandaloneHTTPListen: "127.0.0.1:9998",
+		StandaloneLoginMode:  StandaloneLoginModeDisabled,
 	}
 }
 
@@ -222,8 +227,5 @@ func backendConfigIsDefault(c BackendConfig) bool {
 func backendConfigComparable(c BackendConfig) BackendConfig {
 	c.ABSJWTSecret = nil
 	c.UpdatedAt = time.Time{}
-	if c.PathRemappings == nil {
-		c.PathRemappings = []PathRemap{}
-	}
 	return c
 }

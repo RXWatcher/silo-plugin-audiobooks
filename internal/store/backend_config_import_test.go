@@ -25,20 +25,15 @@ func TestImportLegacyBackendConfigSeedsOnlyDefaultFields(t *testing.T) {
 	}
 
 	if err := st.UpdateBackendConfig(ctx, store.BackendConfig{
-		TargetBackendPluginID:    cfg.TargetBackendPluginID,
-		TargetBackendInstallID:   cfg.TargetBackendInstallID,
-		TargetRequestPluginID:    cfg.TargetRequestPluginID,
-		TargetRequestInstallID:   cfg.TargetRequestInstallID,
-		AutoApproveRequests:      cfg.AutoApproveRequests,
-		StreamingMode:            cfg.StreamingMode,
-		CacheDir:                 cfg.CacheDir,
-		CacheMaxSizeGB:           cfg.CacheMaxSizeGB,
-		CacheDownloadConcurrency: cfg.CacheDownloadConcurrency,
-		PathRemappings:           cfg.PathRemappings,
-		ABSJWTSecret:             cfg.ABSJWTSecret,
-		ABSAccessTTLHours:        cfg.ABSAccessTTLHours,
-		ABSRefreshTTLDays:        cfg.ABSRefreshTTLDays,
-		StandaloneHTTPListen:     "127.0.0.1:9999",
+		TargetBackendPluginID:  cfg.TargetBackendPluginID,
+		TargetBackendInstallID: cfg.TargetBackendInstallID,
+		TargetRequestPluginID:  cfg.TargetRequestPluginID,
+		TargetRequestInstallID: cfg.TargetRequestInstallID,
+		AutoApproveRequests:    cfg.AutoApproveRequests,
+		ABSJWTSecret:           cfg.ABSJWTSecret,
+		ABSAccessTTLHours:      cfg.ABSAccessTTLHours,
+		ABSRefreshTTLDays:      cfg.ABSRefreshTTLDays,
+		StandaloneHTTPListen:   "127.0.0.1:9999",
 	}); err != nil {
 		t.Fatalf("admin update: %v", err)
 	}
@@ -51,5 +46,18 @@ func TestImportLegacyBackendConfigSeedsOnlyDefaultFields(t *testing.T) {
 	}
 	if cfg.StandaloneHTTPListen != "127.0.0.1:9999" {
 		t.Fatalf("legacy import overwrote standalone listener: %q", cfg.StandaloneHTTPListen)
+	}
+}
+
+func TestEnsureBackendConfigDefaultsStandaloneListener(t *testing.T) {
+	st, ctx := newStore(t)
+	secret := bytes.Repeat([]byte{2}, 32)
+
+	cfg, err := st.EnsureBackendConfig(ctx, secret)
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if cfg.StandaloneHTTPListen != "127.0.0.1:9998" {
+		t.Fatalf("unexpected standalone listener default: %q", cfg.StandaloneHTTPListen)
 	}
 }

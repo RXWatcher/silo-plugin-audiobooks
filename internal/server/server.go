@@ -53,6 +53,7 @@ func (s *Server) Handler() http.Handler {
 		s.mountUserStateRoutes(r)
 		s.mountRequestRoutes(r)
 		s.mountCollectionRoutes(r)
+		s.mountABSStandaloneRoutes(r)
 		s.mountAdminRoutes(r)
 		s.mountStreamRoutes(r)
 	})

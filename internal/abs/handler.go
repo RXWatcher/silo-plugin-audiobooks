@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,17 +16,28 @@ import (
 
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/bookref"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/hostlogin"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/store"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/streaming"
 )
 
 // Handler wires the /abs/api/* and /abs/public/* surface.
 type Handler struct {
-	store      *store.Store
-	backend    *backend.Client
-	logger     Logger
-	targetFn   func(ctx context.Context) (string, store.BackendConfig, error)
-	hostBaseFn func() string
-	installID  func() string // current plugin install ID for building public URLs
+	store        *store.Store
+	backend      *backend.Client
+	streaming    *streaming.Router
+	logger       Logger
+	targetFn     func(ctx context.Context) (string, store.BackendConfig, error)
+	hostBaseFn   func() string
+	installID    func() string // current plugin install ID for building public URLs
+	hostLogin    HostLoginValidator
+	loginLimiter *LoginLimiter
+}
+
+// HostLoginValidator validates username/password against the Continuum host.
+// Implemented by hostlogin.Client; surfaced as an interface so tests can stub.
+type HostLoginValidator interface {
+	Validate(ctx context.Context, username, password, deviceName, ip string) (hostlogin.Result, error)
 }
 
 // Logger is a minimal interface to keep Handler decoupled from hclog.
@@ -43,10 +56,19 @@ func (noopLogger) Debug(string, ...any) {}
 type Deps struct {
 	Store      *store.Store
 	Backend    *backend.Client
+	Streaming  *streaming.Router
 	Logger     Logger
 	TargetFn   func(ctx context.Context) (string, store.BackendConfig, error)
 	HostBaseFn func() string
 	InstallID  func() string
+	// HostLogin validates body-creds against the Continuum host's
+	// /api/v1/auth/login endpoint. May be nil; when nil, the body-creds
+	// login path returns 503 regardless of admin mode.
+	HostLogin HostLoginValidator
+	// LoginLimiter throttles standalone-port body-creds login attempts per
+	// source IP. Construct one per process (its janitor is a long-lived
+	// goroutine) and share it across plugin reconfigures.
+	LoginLimiter *LoginLimiter
 }
 
 // NewHandler builds a handler.
@@ -60,10 +82,52 @@ func NewHandler(d Deps) *Handler {
 	if d.InstallID == nil {
 		d.InstallID = func() string { return "continuum.audiobooks" }
 	}
-	return &Handler{
-		store: d.Store, backend: d.Backend, logger: d.Logger,
-		targetFn: d.TargetFn, hostBaseFn: d.HostBaseFn, installID: d.InstallID,
+	lim := d.LoginLimiter
+	if lim == nil {
+		// Tests may construct a Handler without injecting a limiter; spin
+		// one up locally. Production code passes a shared limiter via Deps.
+		lim = NewLoginLimiter()
 	}
+	return &Handler{
+		store: d.Store, backend: d.Backend, streaming: d.Streaming, logger: d.Logger,
+		targetFn: d.TargetFn, hostBaseFn: d.HostBaseFn, installID: d.InstallID,
+		hostLogin:    d.HostLogin,
+		loginLimiter: lim,
+	}
+}
+
+// absBaseURL returns the URL prefix the ABS client should resolve any
+// further response-embedded URLs against. Detection:
+//
+//   - Standalone listener: X-Continuum-* headers were stripped at
+//     httproutes/server.go before the handler ran. r.Host carries the
+//     listener's hostname (e.g. abs.example.com). Return
+//     "<scheme>://<host>" — origin only, no prefix.
+//   - Host-proxied: the continuum host stamps X-Continuum-User-Id on every
+//     forwarded request (continuum/internal/plugins/http_proxy.go). Return
+//     "<scheme>://<host>/api/v1/plugins/<installID>" so subsequent URLs
+//     stay routable through the host's plugin proxy.
+//
+// Honour X-Forwarded-Proto / X-Forwarded-Host when they are present so
+// operators terminating TLS at a reverse proxy don't end up with http:// in
+// emitted URLs.
+func (h *Handler) absBaseURL(r *http.Request) string {
+	scheme := r.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+	if r.Header.Get("X-Continuum-User-Id") != "" {
+		return fmt.Sprintf("%s://%s/api/v1/plugins/%s", scheme, host, h.installID())
+	}
+	return fmt.Sprintf("%s://%s", scheme, host)
 }
 
 // Mount registers /abs/api/* + /abs/public/* on the parent router.
@@ -269,33 +333,127 @@ func (h *Handler) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// handleLogin mints ABS access + refresh JWTs for the caller. Identity is
-// taken from the continuum-proxy-injected X-Continuum-User-Id header: the
-// host validates the session cookie / API token before forwarding the
-// request, so reaching this handler with that header set is proof of a
-// valid continuum session.
+// handleLogin mints ABS access + refresh JWTs for the caller.
 //
-// SECURITY: we deliberately do NOT fall back to a body-supplied username.
-// On the standalone HTTP listener the host proxy never runs and the
-// X-Continuum-User-* headers are explicitly stripped at the listener
-// boundary (httproutes/server.go ServeHTTP). Accepting an arbitrary body
-// username there would let any unauthenticated client mint a JWT for any
-// user — a complete auth bypass. Operators issue tokens to mobile clients
-// by logging into continuum via the host UI (which sets the headers when
-// proxying), then handing the resulting token off to the client. POSTing
-// /abs/api/login directly to the standalone port always 401s.
+// There are two ways to establish identity here:
 //
-// Drift from the spec: the original ABS design has /login validate a
-// username+password pair against a local user table. The continuum
-// architecture puts auth at the host instead, so we delegate. If the SDK
-// ever exposes a credential-validation RPC, we can lift that here without
-// changing the standalone-port contract.
+//  1. Host-proxied path: the X-Continuum-User-Id header is set. The host
+//     validated the session cookie / API token before forwarding the request,
+//     so reaching this handler with that header set is proof of a valid
+//     continuum session. Trusted unconditionally — this branch is unchanged
+//     from the pre-standalone-login design.
+//
+//  2. Standalone-port body-creds path: the header is absent (the standalone
+//     listener strips X-Continuum-* before invoking the handler — see
+//     httproutes/server.go). The request body holds {username, password}
+//     from an official Audiobookshelf client. We validate those credentials
+//     against the Continuum host's POST /api/v1/auth/login endpoint, which
+//     pins on user.LocalPasswordLoginEnabled in the host's LocalProvider, so
+//     listeners without a local password fail closed.
+//
+// The body-creds path is gated by the admin-managed
+// backend_config.standalone_login_mode setting:
+//
+//   - "disabled": header path only. Body-creds always 401.
+//   - "opt_in":   body-creds works for users with a row in
+//     abs_standalone_opt_ins.
+//   - "all_accounts": body-creds works for any account the host's local
+//     provider accepts.
+//
+// A per-IP rate limiter throttles body-creds attempts. The host-proxied
+// branch is never rate-limited.
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
-	userID := r.Header.Get("X-Continuum-User-Id")
-	if userID == "" {
+	if userID := r.Header.Get("X-Continuum-User-Id"); userID != "" {
+		h.completeLogin(w, r, userID)
+		return
+	}
+	h.handleStandaloneLogin(w, r)
+}
+
+// handleStandaloneLogin runs the body-creds path when no host-proxied
+// identity header is present.
+func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) {
+	_, cfg, err := h.targetFn(r.Context())
+	if err != nil {
+		http.Error(w, "config unavailable", http.StatusInternalServerError)
+		return
+	}
+	mode := store.NormalizeStandaloneLoginMode(cfg.StandaloneLoginMode)
+	if mode == store.StandaloneLoginModeDisabled {
 		http.Error(w, "login must be initiated via the continuum host; standalone /login is not accepted", http.StatusUnauthorized)
 		return
 	}
+	if h.hostLogin == nil {
+		// Mode says body-creds is allowed but the deployment didn't wire a
+		// host-login client. Fail closed loudly so the operator notices.
+		h.logger.Warn("abs.standalone_login: no host-login client configured", "mode", mode)
+		http.Error(w, "standalone login is unavailable in this deployment", http.StatusServiceUnavailable)
+		return
+	}
+
+	ip := clientIP(r)
+	if !h.loginLimiter.allow(ip) {
+		h.logger.Warn("abs.standalone_login: rate limited", "ip", ip, "mode", mode)
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "too many login attempts; try again shortly", http.StatusTooManyRequests)
+		return
+	}
+
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(body.Username) == "" || body.Password == "" {
+		http.Error(w, "username and password are required", http.StatusUnauthorized)
+		return
+	}
+
+	res, err := h.hostLogin.Validate(r.Context(), body.Username, body.Password, r.UserAgent(), ip)
+	if err != nil {
+		if errors.Is(err, hostlogin.ErrInvalidCredentials) {
+			h.logger.Warn("abs.standalone_login: invalid credentials",
+				"ip", ip, "username", body.Username, "mode", mode)
+			http.Error(w, "invalid username or password", http.StatusUnauthorized)
+			return
+		}
+		h.logger.Warn("abs.standalone_login: upstream error",
+			"ip", ip, "username", body.Username, "mode", mode, "err", err.Error())
+		http.Error(w, "upstream login unavailable", http.StatusBadGateway)
+		return
+	}
+
+	if mode == store.StandaloneLoginModeOptIn {
+		ok, hErr := h.store.HasStandaloneOptIn(r.Context(), res.UserID)
+		if hErr != nil {
+			h.logger.Warn("abs.standalone_login: opt-in lookup failed",
+				"ip", ip, "user_id", res.UserID, "err", hErr.Error())
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			h.logger.Warn("abs.standalone_login: user not opted in",
+				"ip", ip, "user_id", res.UserID)
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"error":   "not_enabled_for_mobile_login",
+				"message": "Mobile-app login is not enabled for this account. Enable it from the audiobooks portal under account settings.",
+			})
+			return
+		}
+	}
+
+	h.logger.Debug("abs.standalone_login: success",
+		"ip", ip, "user_id", res.UserID, "mode", mode)
+	h.completeLogin(w, r, res.UserID)
+}
+
+// completeLogin mints ABS access + refresh JWTs for the validated user and
+// writes the login response. Shared by both the header path and the
+// body-creds path so the response shape is identical.
+func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID string) {
 	_, cfg, err := h.targetFn(r.Context())
 	if err != nil {
 		http.Error(w, "config unavailable", http.StatusInternalServerError)
@@ -598,25 +756,58 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d = withPortalLibraryDetail(d, lib)
-	// The contentUrl for each track is the bearer-protected web stream URL.
-	// Drift from spec: spec wanted a session-scoped URL; we'd need to mint
-	// a session JWT here. For now, use bearer-protected web stream.
-	contentURLFn := func(idx int) string {
-		return h.backend.StreamURL(lib.BackendPluginID, backendBookID, idx)
+	// The contentUrl for each track in the item-detail response is
+	// informational — ABS clients that follow the canonical flow POST
+	// /api/items/{id}/play first to mint a session-scoped contentUrl
+	// (see handlePlay below), which is what actually carries the
+	// signed media token. The URL we emit here is origin-aware so a
+	// client that pre-fetches against it lands on the right host, but
+	// it points at the play-flow entry rather than at a raw stream
+	// URL that wouldn't carry a token.
+	baseURL := h.absBaseURL(r)
+	contentURLFn := func(_ int) string {
+		return baseURL + "/abs/api/items/" + encodedBookID + "/play"
 	}
 	item := ToLibraryItem(d, contentURLFn)
 	item.ID = encodedBookID
 	writeJSON(w, http.StatusOK, item)
 }
 
+// handleItemCover proxies cover bytes from the backend plugin rather than
+// redirecting. Two reasons: (1) some ABS clients don't follow redirects on
+// cover URLs (booklore-ng documents this with the same workaround at
+// src/lib/audiobookshelf/cover-handler.ts:41), and (2) the backend plugin's
+// cover endpoint lives under /api/v1/plugins/<install>/... on the continuum
+// host; redirecting an ABS client connected to the standalone listener
+// (e.g. abs.example.com) to that path would 404 because the standalone
+// listener doesn't serve the host's /api/v1/plugins/* surface.
+//
+// Body is buffered into memory via HostClient.GetBinary; covers are typically
+// well under maxResponseBytes (10 MiB), so this is fine. Audio streaming
+// keeps its redirect-based flow — proxying multi-hundred-MB files through
+// the plugin host would dwarf the cost of an extra config knob.
 func (h *Handler) handleItemCover(w http.ResponseWriter, r *http.Request) {
+	a, _ := absAuthFrom(r)
 	lib, backendBookID, _, err := h.portalLibraryForBookRef(r.Context(), chi.URLParam(r, "id"))
 	if err != nil || lib.BackendPluginID == "" {
 		http.Error(w, "no backend configured", http.StatusPreconditionFailed)
 		return
 	}
 	size := r.URL.Query().Get("size")
-	http.Redirect(w, r, h.backend.CoverURL(lib.BackendPluginID, backendBookID, size), http.StatusFound)
+	body, contentType, err := h.backend.FetchCover(r.Context(), a.Token, lib.BackendPluginID, backendBookID, size)
+	if err != nil {
+		h.logger.Warn("abs cover fetch failed",
+			"book_id", backendBookID, "size", size, "err", err.Error())
+		http.Error(w, "cover unavailable", http.StatusBadGateway)
+		return
+	}
+	if contentType == "" {
+		contentType = "image/jpeg"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	_, _ = w.Write(body)
 }
 
 type playPayload struct {
@@ -661,13 +852,16 @@ func (h *Handler) handlePlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build session-scoped contentURL per track.
-	hostBase := h.hostBaseFn()
-	installID := h.installID()
+	// Build session-scoped contentURL per track. The URL must resolve from
+	// whichever origin the ABS client is connected to — standalone listener
+	// or host plugin proxy — so we build an absolute URL based on the
+	// inbound request's origin rather than the env-supplied hostBase, which
+	// only describes the host's internal API URL.
+	baseURL := h.absBaseURL(r)
 	tracks := make([]AudioTrack, len(d.Files))
 	for i, f := range d.Files {
 		tok, _ := IssueSessionToken(cfg.ABSJWTSecret, a.UserID, sessionID, encodedBookID, f.Index, 6*time.Hour)
-		trackURL := hostBase + "/api/v1/plugins/" + installID +
+		trackURL := baseURL +
 			"/abs/public/session/" + sessionID + "/track/" + strconv.Itoa(f.Index) +
 			"?token=" + tok
 		tracks[i] = AudioTrack{
@@ -785,10 +979,23 @@ func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no backend configured", http.StatusPreconditionFailed)
 		return
 	}
-	// Redirect to the backend's stream URL. (The proxy will validate the
-	// inbound bearer the audio client would otherwise need — here we let the
-	// session-token-already-verified state stand in.)
-	http.Redirect(w, r, h.backend.StreamURL(lib.BackendPluginID, backendBookID, idx), http.StatusFound)
+	// Delegate to the streaming router so the redirect target carries a
+	// freshly-minted signed media token bound to (userID, bookID, fileIdx).
+	// The session-token validation above already proved the caller's right
+	// to this file; we hand off identity to the router for the signed-URL
+	// minting only.
+	//
+	// Known limitation: the redirect target is the backend plugin's
+	// host-proxied stream path. ABS clients connected via the standalone
+	// listener cannot follow that redirect unless the backend's stream
+	// route is reachable from the same origin (operator config). See
+	// docs/2026-05-21-standalone-abs-login.md for the follow-up needed to
+	// proxy audio bytes through the standalone listener.
+	if h.streaming == nil {
+		http.Error(w, "streaming router not configured", http.StatusInternalServerError)
+		return
+	}
+	h.streaming.Stream(w, r, sess.UserID, lib.BackendPluginID, backendBookID, idx)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

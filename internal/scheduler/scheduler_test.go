@@ -9,9 +9,10 @@ import (
 
 func TestTaskID(t *testing.T) {
 	cases := map[string]string{
-		"plugin:42:request_reconciler": "request_reconciler", // real host wire format
-		"plugin:7:cache_evictor":       "cache_evictor",
-		"request_reconciler":           "request_reconciler", // bare (host integration tests)
+		"plugin:42:request_reconciler":  "request_reconciler", // real host wire format
+		"plugin:42:portal_library_sync": "portal_library_sync",
+		"plugin:7:cache_evictor":        "cache_evictor",
+		"request_reconciler":            "request_reconciler", // bare (host integration tests)
 	}
 	for in, want := range cases {
 		if got := taskID(in); got != want {

@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Activity,
   Bookmark,
-  Bug,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Copy,
   Download,
@@ -37,12 +38,6 @@ function fmt(t: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function fmtBytes(bytes: number): string {
-  if (!bytes) return '0 MB';
-  const mb = bytes / 1024 / 1024;
-  return `${mb >= 10 ? Math.round(mb) : mb.toFixed(1)} MB`;
-}
-
 export default function AudioPlayer({
   audiobook,
   initialPosition,
@@ -56,6 +51,10 @@ export default function AudioPlayer({
 }) {
   const playback = usePlayback();
   const active = playback.isCurrentBook(audiobook.id);
+  // Seven selects + checkboxes is a wall of secondary controls regardless of
+  // viewport width. Speed is the dominant choice, so it stays inline; the rest
+  // collapses behind a "More" toggle on every screen size.
+  const [showMore, setShowMore] = useState(false);
 
   useEffect(() => {
     playback.startBook(audiobook, initialPosition);
@@ -90,6 +89,31 @@ export default function AudioPlayer({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/*
+            Chapter prev/next is one of the top three audiobook actions — it
+            used to live only in the separate ChapterList component, forcing
+            users to scroll during playback. The seek targets are derived
+            from the same chapters array PlaybackProvider already exposes via
+            activeChapter; we look up the neighbour by adjacency in time.
+          */}
+          {audiobook.chapters?.length ? (
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => {
+                const chapters = audiobook.chapters ?? [];
+                const idx = chapters.findIndex(
+                  (c) => c.start_seconds === playback.activeChapter?.start_seconds,
+                );
+                const prev = idx > 0 ? chapters[idx - 1] : chapters[0];
+                if (prev) playback.seek(prev.start_seconds, playback.playing);
+              }}
+              aria-label="Previous chapter"
+              title="Previous chapter"
+            >
+              <ChevronLeft className="size-5" />
+            </Button>
+          ) : null}
           <Button
             size="icon"
             variant="ghost"
@@ -114,6 +138,24 @@ export default function AudioPlayer({
           >
             <RotateCw className="size-5" />
           </Button>
+          {audiobook.chapters?.length ? (
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => {
+                const chapters = audiobook.chapters ?? [];
+                const idx = chapters.findIndex(
+                  (c) => c.start_seconds === playback.activeChapter?.start_seconds,
+                );
+                const next = idx >= 0 && idx < chapters.length - 1 ? chapters[idx + 1] : null;
+                if (next) playback.seek(next.start_seconds, playback.playing);
+              }}
+              aria-label="Next chapter"
+              title="Next chapter"
+            >
+              <ChevronRight className="size-5" />
+            </Button>
+          ) : null}
           <Button
             size="icon"
             variant="ghost"
@@ -168,6 +210,15 @@ export default function AudioPlayer({
               ))}
             </select>
           </label>
+          <button
+            type="button"
+            onClick={() => setShowMore((v) => !v)}
+            aria-expanded={showMore}
+            className="rounded border bg-background px-2 py-1 text-xs"
+          >
+            {showMore ? 'Less' : 'More controls'}
+          </button>
+          <div className={showMore ? 'contents' : 'hidden'}>
           <label className="flex items-center gap-1">
             <Clock className="text-muted-foreground size-4" />
             <select
@@ -289,6 +340,7 @@ export default function AudioPlayer({
             <Copy className="size-4" />
             Clip
           </Button>
+          </div>
           <span className="text-muted-foreground ml-auto tabular-nums">
             Track {playback.activeFileOrdinal + 1}/{audiobook.files.length} ·{' '}
             {Math.round(playback.progressPct * 100)}%
@@ -299,24 +351,13 @@ export default function AudioPlayer({
             Download failed: {playback.downloadError}
           </div>
         ) : null}
-        <details className="mt-3 rounded-md border border-border bg-background p-3 text-xs">
-          <summary className="flex cursor-pointer items-center gap-2 font-medium">
-            <Bug className="size-4" />
-            Diagnostics
-          </summary>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <div>Session: {playback.sessionId || 'pending'}</div>
-            <div>Source: {playback.sourceLabel}</div>
-            <div>Book time: {Math.floor(playback.bookTime)}s</div>
-            <div>Duration: {Math.floor(playback.duration)}s</div>
-            <div>Track: {playback.activeFileOrdinal + 1}</div>
-            <div>Last sync: {playback.lastSyncAt ? new Date(playback.lastSyncAt).toLocaleTimeString() : 'not yet'}</div>
-            <div>Listened: {fmt(playback.listenedSeconds)}</div>
-            <div>Offline size: {fmtBytes(playback.offlineBytes)}</div>
-            <div>EQ: {EQ_PRESETS.find((preset) => preset.id === playback.eqPreset)?.label}</div>
-            <div>Status: {playback.buffering ? 'buffering' : playback.playing ? 'playing' : 'paused'}</div>
-          </div>
-        </details>
+        {/*
+          The previous Diagnostics <details> block exposed session ids, raw
+          time integers, and EQ preset internals to every user. That belonged
+          in DevTools, not the shipped UI — removed for v1. Operators with a
+          legitimate need for these fields can read them from the network tab
+          or the player Redux-equivalent (PlaybackProvider's exported state).
+        */}
       </div>
     </div>
   );

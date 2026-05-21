@@ -34,11 +34,12 @@ func truncForError(b []byte) string {
 }
 
 // HostClient issues HTTP requests to other plugins via the continuum host's
-// plugin proxy. The portal uses one HostClient per installed backend. The
-// bearer token is provided per-request from the caller (typically the user
-// header forwarded from the inbound request).
+// plugin proxy. The portal uses one HostClient per installed backend. Calls
+// prefer the per-request bearer from the caller and fall back to the plugin's
+// own service token when the inbound request was cookie-authenticated.
 type HostClient struct {
 	base        string
+	token       string
 	hc          *http.Client
 	runtimeHost *runtimehost.Client
 }
@@ -54,6 +55,11 @@ func NewHostClient(hostBaseURL string) *HostClient {
 
 func (c *HostClient) WithRuntimeHost(host *runtimehost.Client) *HostClient {
 	c.runtimeHost = host
+	return c
+}
+
+func (c *HostClient) WithServiceToken(token string) *HostClient {
+	c.token = strings.TrimSpace(token)
 	return c
 }
 
@@ -73,16 +79,80 @@ func (c *HostClient) Get(ctx context.Context, bearerToken, installID, pathAndQue
 	return c.do(ctx, "GET", bearerToken, installID, pathAndQuery, nil)
 }
 
-// GetJSON issues a GET and decodes the JSON response. When the SDK
-// RuntimeHost is available this uses its typed JSON helper; otherwise it
-// falls back to the host HTTP proxy path.
-func (c *HostClient) GetJSON(ctx context.Context, bearerToken, installID, pathAndQuery string, out any) error {
+// GetBinary issues a GET like Get but also returns the upstream Content-Type
+// header, so callers proxying binary payloads (cover images, etc) can preserve
+// it. Body is buffered into memory — only call this for resources expected to
+// fit comfortably under maxResponseBytes (covers are typically &lt; 1 MiB).
+func (c *HostClient) GetBinary(ctx context.Context, bearerToken, installID, pathAndQuery string) (body []byte, contentType string, err error) {
+	token := c.authToken(bearerToken)
 	if c.runtimeHost != nil {
 		if id, err := strconv.Atoi(installID); err == nil && id > 0 {
 			path, query := splitPluginPath(pathAndQuery)
 			headers := map[string]string{}
-			if bearerToken != "" {
-				headers["Authorization"] = "Bearer " + bearerToken
+			if token != "" {
+				headers["Authorization"] = "Bearer " + token
+			}
+			resp, err := c.runtimeHost.CallPluginHTTP(ctx, runtimehost.CallPluginHTTPRequest{
+				InstallationID: id,
+				Method:         "GET",
+				Path:           path,
+				Headers:        headers,
+				Query:          query,
+			})
+			if err != nil {
+				return nil, "", err
+			}
+			if resp.StatusCode >= 400 {
+				return nil, "", fmt.Errorf("backend %d: %s", resp.StatusCode, truncForError(resp.Body))
+			}
+			if len(resp.Body) > maxResponseBytes {
+				return nil, "", fmt.Errorf("response exceeds %d bytes", maxResponseBytes)
+			}
+			ct := ""
+			for k, v := range resp.Headers {
+				if strings.EqualFold(k, "Content-Type") {
+					ct = v
+					break
+				}
+			}
+			return resp.Body, ct, nil
+		}
+	}
+	url := c.pluginURL(installID, pathAndQuery)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("new request: %w", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("do: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, errBodySnippet))
+		return nil, "", fmt.Errorf("backend %d: %s", resp.StatusCode, truncForError(snippet))
+	}
+	out, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return nil, "", fmt.Errorf("read body: %w", err)
+	}
+	return out, resp.Header.Get("Content-Type"), nil
+}
+
+// GetJSON issues a GET and decodes the JSON response. When the SDK
+// RuntimeHost is available this uses its typed JSON helper; otherwise it
+// falls back to the host HTTP proxy path.
+func (c *HostClient) GetJSON(ctx context.Context, bearerToken, installID, pathAndQuery string, out any) error {
+	token := c.authToken(bearerToken)
+	if c.runtimeHost != nil {
+		if id, err := strconv.Atoi(installID); err == nil && id > 0 {
+			path, query := splitPluginPath(pathAndQuery)
+			headers := map[string]string{}
+			if token != "" {
+				headers["Authorization"] = "Bearer " + token
 			}
 			err := c.runtimeHost.CallPluginJSON(ctx, runtimehost.CallPluginJSONRequest{
 				InstallationID:   id,
@@ -99,7 +169,7 @@ func (c *HostClient) GetJSON(ctx context.Context, bearerToken, installID, pathAn
 			return err
 		}
 	}
-	body, err := c.Get(ctx, bearerToken, installID, pathAndQuery)
+	body, err := c.Get(ctx, token, installID, pathAndQuery)
 	if err != nil {
 		return err
 	}
@@ -114,20 +184,35 @@ func (c *HostClient) PostJSON(ctx context.Context, bearerToken, installID, pathA
 	return c.do(ctx, "POST", bearerToken, installID, pathAndQuery, body)
 }
 
-// PluginURL returns the public host URL the SPA / ABS apps can fetch via
+// PluginURL returns an origin-relative path the SPA / ABS apps can fetch via
 // (e.g. for <audio src=...>). Useful for streaming proxy that simply
 // redirects the client.
+//
+// The returned value is intentionally path-only (no scheme or host) so the
+// browser resolves it against its current origin. The internal hostBase
+// (typically http://localhost:8080) is not reachable from a public client.
 func (c *HostClient) PluginURL(installID, pathAndQuery string) string {
-	return c.pluginURL(installID, pathAndQuery)
+	if !strings.HasPrefix(pathAndQuery, "/") {
+		pathAndQuery = "/" + pathAndQuery
+	}
+	return fmt.Sprintf("/api/v1/plugins/%s%s", url.PathEscape(installID), pathAndQuery)
+}
+
+func (c *HostClient) authToken(requestBearer string) string {
+	if token := strings.TrimSpace(requestBearer); token != "" {
+		return token
+	}
+	return c.token
 }
 
 func (c *HostClient) do(ctx context.Context, method, bearer, installID, pathAndQuery string, body []byte) ([]byte, error) {
+	token := c.authToken(bearer)
 	if c.runtimeHost != nil {
 		if id, err := strconv.Atoi(installID); err == nil && id > 0 {
 			path, query := splitPluginPath(pathAndQuery)
 			headers := map[string]string{"Accept": "application/json"}
-			if bearer != "" {
-				headers["Authorization"] = "Bearer " + bearer
+			if token != "" {
+				headers["Authorization"] = "Bearer " + token
 			}
 			if body != nil {
 				headers["Content-Type"] = "application/json"
@@ -161,8 +246,8 @@ func (c *HostClient) do(ctx context.Context, method, bearer, installID, pathAndQ
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
 	}
-	if bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+bearer)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

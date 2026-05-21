@@ -30,6 +30,7 @@ import (
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/consumer"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/event"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/hostlogin"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/httproutes"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/migrate"
 	pluginrt "github.com/ContinuumApp/continuum-plugin-audiobooks/internal/runtime"
@@ -57,20 +58,34 @@ func main() {
 	var (
 		poolPtr          atomic.Pointer[pgxpool.Pool]
 		storePtr         atomic.Pointer[store.Store]
-		cachePtr         atomic.Pointer[streaming.Cache]
 		standaloneOnce   sync.Once
 		standaloneAddr   atomic.Value // string; tracks the bound addr so reconfigures can warn on change
 		standaloneSrvPtr atomic.Pointer[http.Server]
 	)
 
 	// Host base URL used to build self-referential public stream URLs in
-	// the ABS handler. The continuum host doesn't expose its public URL via
-	// the plugin SDK; we read CONTINUUM_HOST_URL from the env as a stopgap.
+	// the ABS handler. Prefer the public host URL when available, but fall
+	// back to the host API base for local/dev setups.
 	hostBase := os.Getenv("CONTINUUM_HOST_URL")
+	if hostBase == "" {
+		hostBase = os.Getenv("CONTINUUM_HOST_BASE_URL")
+	}
 	if hostBase == "" {
 		hostBase = "http://localhost:8080"
 	}
-	bkClient := backend.NewClient(backend.NewHostClient(hostBase).WithRuntimeHost(sdkruntime.Host()))
+	hostToken := os.Getenv("CONTINUUM_PLUGIN_TOKEN")
+	bkClient := backend.NewClient(backend.NewHostClient(hostBase).WithServiceToken(hostToken).WithRuntimeHost(sdkruntime.Host()))
+
+	// Host-login client used by the ABS standalone-port body-creds path. It
+	// posts to {hostBase}/api/v1/auth/login with provider="local". When
+	// hostBase is unreachable the handler returns 502, so the client is safe
+	// to construct eagerly.
+	hostLoginClient := hostlogin.New(hostBase)
+
+	// Per-IP rate limiter for the standalone-port body-creds login path.
+	// Constructed once at process scope so the janitor goroutine doesn't
+	// leak on each plugin reconfigure (NewHandler is called per-Configure).
+	loginLimiter := abs.NewLoginLimiter()
 
 	rt := pluginrt.New(manifest, func(cfg pluginrt.Config) error {
 		ctx := context.Background()
@@ -118,21 +133,27 @@ func main() {
 			bcfg = imported
 		}
 
-		// Wire streaming layer.
-		var cache *streaming.Cache
-		if bcfg.CacheDir != "" {
-			maxBytes := int64(bcfg.CacheMaxSizeGB) * 1024 * 1024 * 1024
-			cache = streaming.NewCache(bcfg.CacheDir, maxBytes, st)
+		// Wire streaming layer — a thin 302 to the backend's stream URL with
+		// a freshly-minted signed media token. The SecretProvider reads from
+		// the store on each call so admin updates to media_signing_secret
+		// take effect without a plugin restart.
+		streamSecret := func() string {
+			cfg, err := st.GetBackendConfig(ctx)
+			if err != nil {
+				return ""
+			}
+			return cfg.MediaSigningSecret
 		}
-		streamRouter := streaming.NewRouter(st, bkClient, cache)
+		streamRouter := streaming.NewRouter(bkClient, streamSecret)
 
 		ev := event.New(sdkruntime.Host(), logger)
 
 		// ABS handler.
 		absHandler := abs.NewHandler(abs.Deps{
-			Store:   st,
-			Backend: bkClient,
-			Logger:  hclogAdapter{logger},
+			Store:     st,
+			Backend:   bkClient,
+			Streaming: streamRouter,
+			Logger:    hclogAdapter{logger},
 			TargetFn: func(ctx context.Context) (string, store.BackendConfig, error) {
 				cfg, err := st.GetBackendConfig(ctx)
 				if err != nil {
@@ -140,8 +161,10 @@ func main() {
 				}
 				return cfg.BackendInstallID(), cfg, nil
 			},
-			HostBaseFn: func() string { return hostBase },
-			InstallID:  func() string { return "continuum.audiobooks" },
+			HostBaseFn:   func() string { return hostBase },
+			InstallID:    func() string { return "continuum.audiobooks" },
+			HostLogin:    hostLoginClient,
+			LoginLimiter: loginLimiter,
 		})
 
 		srv := server.New(server.Deps{
@@ -188,13 +211,10 @@ func main() {
 		}
 
 		storePtr.Store(st)
-		if cache != nil {
-			cachePtr.Store(cache)
-		}
 		if old := poolPtr.Swap(p); old != nil {
 			old.Close()
 		}
-		logger.Info("configured", "target_backend", bcfg.TargetBackendPluginID, "streaming_mode", bcfg.StreamingMode)
+		logger.Info("configured", "target_backend", bcfg.TargetBackendPluginID)
 		return nil
 	})
 
@@ -236,7 +256,6 @@ func main() {
 		return &scheduler.Deps{
 			Store:   st,
 			Backend: bkClient,
-			Cache:   cachePtr.Load(),
 		}
 	}, logger)
 

@@ -21,6 +21,12 @@ export interface AudiobookFile {
   format: string;
   duration_seconds: number;
   size_bytes?: number;
+  /**
+   * Portal-signed URL the browser puts in <audio src>. Includes a short-TTL
+   * signed media token so the backend can authenticate without the browser
+   * sending Authorization headers.
+   */
+  stream_url?: string;
 }
 
 export interface AudiobookChapter {
@@ -141,7 +147,25 @@ export interface BackendConfig {
   abs_access_token_ttl_hours: number;
   abs_refresh_token_ttl_days: number;
   standalone_http_listen: string;
+  standalone_login_mode: StandaloneLoginMode;
   libraries?: LibraryInfo[];
+}
+
+// StandaloneLoginMode controls whether the standalone-port /abs/api/login
+// accepts username+password from Audiobookshelf clients, and whether each
+// account must opt in first. Mirrors the Go enum in
+// internal/store/backend_config.go.
+export type StandaloneLoginMode = 'disabled' | 'opt_in' | 'all_accounts';
+
+export const STANDALONE_LOGIN_MODES: StandaloneLoginMode[] = [
+  'disabled',
+  'opt_in',
+  'all_accounts',
+];
+
+export interface ABSStandaloneOptInState {
+  mode: StandaloneLoginMode;
+  enabled: boolean;
 }
 
 export interface ABSSession {
@@ -219,5 +243,6 @@ export interface InstalledBackend {
   enabled: boolean;
   capabilities: InstalledCapability[];
   audiobook_backend?: InstalledCapability;
+  audiobook_roles: string[];
   summary?: string;
 }

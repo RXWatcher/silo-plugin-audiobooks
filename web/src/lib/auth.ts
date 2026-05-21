@@ -23,6 +23,10 @@ export function getCachedToken(): string | null {
   return cachedToken;
 }
 
+export function setCachedToken(token: string | null): void {
+  cachedToken = token;
+}
+
 export function getCachedTheme(): string | null {
   return cachedTheme;
 }

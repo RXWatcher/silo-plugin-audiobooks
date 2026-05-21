@@ -7,12 +7,15 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/migrate"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/server"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/store"
@@ -33,6 +36,21 @@ func liveServer(t *testing.T) (http.Handler, *store.Store) {
 	t.Cleanup(pool.Close)
 	st := store.New(pool)
 	return server.New(server.Deps{Store: st}).Handler(), st
+}
+
+func liveServerWithBackend(t *testing.T, bk *backend.Client) (http.Handler, *store.Store) {
+	t.Helper()
+	dsn := testutil.StartPG(t)
+	if err := migrate.Run(context.Background(), dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	st := store.New(pool)
+	return server.New(server.Deps{Store: st, Backend: bk}).Handler(), st
 }
 
 // brokenServer builds a Server whose store cannot reach its database, so
@@ -259,6 +277,172 @@ func TestWebPlaybackSessionStatsAndUserSessionList(t *testing.T) {
 	}
 	if stats.ListenedSeconds != 7 || stats.LastPosition != 30 {
 		t.Fatalf("unexpected stats: %+v", stats)
+	}
+}
+
+func TestAdminSyncLibraries(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		gotAuth string
+		gotPath string
+	)
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		mu.Unlock()
+		if r.URL.Path != "/api/v1/plugins/11/api/v1/catalog/libraries" {
+			// FailNow inside a server goroutine only stops this goroutine,
+			// not the test. Reply 500 and let the test thread observe.
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[{"id":5,"name":"Fiction","media_type":"audiobook"}]}`))
+	}))
+	defer host.Close()
+
+	h, st := liveServerWithBackend(t, backend.NewClient(backend.NewHostClient(host.URL)))
+	ctx := context.Background()
+	if err := st.ReplacePortalLibraries(ctx, []store.PortalLibrary{{
+		ID: 0, Name: "Manual shelf", MediaType: "audiobook", BackendPluginID: "other", Enabled: true, SortOrder: 0,
+	}}); err != nil {
+		t.Fatalf("seed libraries: %v", err)
+	}
+
+	headers := map[string]string{
+		"X-Continuum-User-Id":   "root",
+		"X-Continuum-User-Role": "admin",
+		"Authorization":         "Bearer admin-token",
+	}
+	w := do(h, req("POST", "/api/v1/admin/libraries/sync?backend_plugin_id=11", headers))
+	if w.Code != http.StatusOK {
+		mu.Lock()
+		path := gotPath
+		mu.Unlock()
+		t.Fatalf("sync libraries = %d path-seen=%q body=%s, want 200", w.Code, path, w.Body)
+	}
+	mu.Lock()
+	auth := gotAuth
+	mu.Unlock()
+	if auth != "Bearer admin-token" {
+		t.Fatalf("backend auth = %q, want forwarded bearer", auth)
+	}
+	var stats struct {
+		Created int `json:"created"`
+		Updated int `json:"updated"`
+		Pruned  int `json:"pruned"`
+		Kept    int `json:"kept"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&stats); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	if stats.Created != 1 || stats.Kept != 1 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	libs, err := st.ListPortalLibraries(ctx, false)
+	if err != nil {
+		t.Fatalf("list libraries: %v", err)
+	}
+	if len(libs) != 2 {
+		t.Fatalf("libraries count = %d, want 2", len(libs))
+	}
+}
+
+func TestListAudiobooks_UsesServiceTokenForCookieAuthenticatedUser(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		gotAuth string
+		gotPath string
+	)
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		mu.Unlock()
+		if r.URL.Path != "/api/v1/plugins/47/api/v1/catalog" {
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[{"id":"bw-1","title":"Isolation"}],"total":1}`))
+	}))
+	defer host.Close()
+
+	h, st := liveServerWithBackend(t, backend.NewClient(backend.NewHostClient(host.URL).WithServiceToken("svc-token")))
+	ctx := context.Background()
+	if _, err := st.EnsureBackendConfig(ctx, []byte("0123456789abcdef0123456789abcdef")); err != nil {
+		t.Fatalf("ensure backend config: %v", err)
+	}
+	if err := st.ReplacePortalLibraries(ctx, []store.PortalLibrary{{
+		Name:            "Audiobooks",
+		MediaType:       "audiobook",
+		BackendPluginID: "47",
+		Enabled:         true,
+		SortOrder:       0,
+	}}); err != nil {
+		t.Fatalf("seed libraries: %v", err)
+	}
+	libs, err := st.ListPortalLibraries(ctx, false)
+	if err != nil {
+		t.Fatalf("list libraries: %v", err)
+	}
+	if len(libs) != 1 {
+		t.Fatalf("libraries count = %d, want 1", len(libs))
+	}
+
+	w := do(h, req("GET", "/api/v1/audiobooks?limit=1&library_id="+strconv.FormatInt(libs[0].ID, 10), asUser))
+	if w.Code != http.StatusOK {
+		mu.Lock()
+		path := gotPath
+		mu.Unlock()
+		t.Fatalf("list audiobooks = %d path-seen=%q body=%s, want 200", w.Code, path, w.Body)
+	}
+	mu.Lock()
+	auth := gotAuth
+	mu.Unlock()
+	if auth != "Bearer svc-token" {
+		t.Fatalf("backend auth = %q, want service token fallback", auth)
+	}
+	var out struct {
+		Items []backend.AudiobookSummary `json:"items"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(out.Items) != 1 || out.Items[0].Title != "Isolation" {
+		t.Fatalf("unexpected catalog response: %+v", out.Items)
+	}
+}
+
+func TestAdminSyncLibraries_GuardsBackendFailures(t *testing.T) {
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream failed", http.StatusUnauthorized)
+	}))
+	defer host.Close()
+
+	h, st := liveServerWithBackend(t, backend.NewClient(backend.NewHostClient(host.URL)))
+	ctx := context.Background()
+	seed := []store.PortalLibrary{{
+		ID: 0, Name: "Existing shelf", MediaType: "audiobook", BackendPluginID: "11", Enabled: true, SortOrder: 0,
+	}}
+	if err := st.ReplacePortalLibraries(ctx, seed); err != nil {
+		t.Fatalf("seed libraries: %v", err)
+	}
+
+	headers := map[string]string{
+		"X-Continuum-User-Id":   "root",
+		"X-Continuum-User-Role": "admin",
+		"Authorization":         "Bearer admin-token",
+	}
+	w := do(h, req("POST", "/api/v1/admin/libraries/sync?backend_plugin_id=11", headers))
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("sync libraries failure = %d body=%s, want 502", w.Code, w.Body)
+	}
+	libs, err := st.ListPortalLibraries(ctx, false)
+	if err != nil {
+		t.Fatalf("list libraries: %v", err)
+	}
+	if len(libs) != 1 || libs[0].Name != "Existing shelf" {
+		t.Fatalf("libraries changed after failed sync: %+v", libs)
 	}
 }
 

@@ -14,8 +14,7 @@ import (
 
 // Metadata enrichment surface — calls into OpenLibrary + Google
 // Books in parallel and merges the candidate lists. Admin uses it
-// during the BookDrop review flow to fill in missing fields before
-// approving an import.
+// to fill in missing fields on a book before importing.
 //
 // Both providers are unauthenticated; rate limits are generous for
 // the few-requests-per-import volume we'll generate. Failures are

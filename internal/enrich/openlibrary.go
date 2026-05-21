@@ -1,6 +1,6 @@
 // Package enrich wraps free metadata providers (OpenLibrary +
-// Google Books) used for fleshing out sparse imports. The BookDrop
-// flow + admin "enrich" action both call into here.
+// Google Books) used for fleshing out sparse imports. Admin
+// "enrich" action calls into here.
 //
 // Each provider is a narrow client: Search(query) returns a
 // candidate list ranked by the provider's own relevance score; the

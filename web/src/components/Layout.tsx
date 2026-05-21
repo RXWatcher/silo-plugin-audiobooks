@@ -6,14 +6,24 @@ import {
   Home as HomeIcon,
   Layers,
   Library,
+  Search,
   Smartphone,
   ListChecks,
   Users,
   Mic,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CommandPaletteProvider, useCommandPalette } from '@/components/CommandPalette';
 
 export default function Layout() {
+  return (
+    <CommandPaletteProvider>
+      <LayoutInner />
+    </CommandPaletteProvider>
+  );
+}
+
+function LayoutInner() {
   const loc = useLocation();
   const isAdminRoute = loc.pathname.startsWith('/admin');
   const backToContinuumHref = isAdminRoute ? '/admin/plugins' : '/';
@@ -42,6 +52,7 @@ export default function Layout() {
           </h1>
         </div>
         <nav className="flex items-center gap-1">
+          <CmdKButton />
           <NavItem to="/" icon={<HomeIcon className="size-4" />} label="Home" exact />
           <NavItem to="/library" icon={<Library className="size-4" />} label="Library" />
           <NavItem to="/authors" icon={<Users className="size-4" />} label="Authors" />
@@ -67,6 +78,21 @@ export default function Layout() {
         <Outlet />
       </main>
     </div>
+  );
+}
+
+function CmdKButton() {
+  const { open } = useCommandPalette();
+  return (
+    <button
+      type="button"
+      onClick={open}
+      title="Search (Cmd-K)"
+      className="text-muted-foreground hover:bg-surface-hover hover:text-foreground inline-flex min-h-9 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+    >
+      <Search className="size-4" />
+      <kbd className="border-border hidden rounded border px-1.5 py-0.5 text-xs sm:inline">⌘K</kbd>
+    </button>
   );
 }
 

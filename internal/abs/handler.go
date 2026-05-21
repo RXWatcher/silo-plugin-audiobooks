@@ -190,48 +190,74 @@ func (h *Handler) absBaseURL(r *http.Request) string {
 }
 
 // Mount registers /abs/api/* + /abs/public/* on the parent router.
+// Mount registers the ABS-compatible routes at both the legacy
+// /abs/api/* prefix (used by host-proxied callers and our own SPA)
+// and the upstream-canonical paths the official ABS clients build
+// against. Mainline mobile + web clients construct URLs as
+// `${serverAddress}/login`, `${serverAddress}/api/libraries`, etc. —
+// no /abs/api prefix — so without the root-mount the apps cannot
+// even reach the login endpoint.
+//
+// The dual mount means an operator can point the official ABS app
+// directly at `https://abs.example.com` (no path prefix) and have
+// every endpoint resolve, while our internal SPA continues to call
+// /abs/api/* on the same listener.
 func (h *Handler) Mount(r chi.Router) {
-	r.Get("/abs/api/ping", h.handlePing)
-	r.Get("/abs/api/healthcheck", h.handlePing)
-	r.Get("/abs/api/init", h.handleInit)
-	r.Get("/abs/api/status", h.handleStatus)
-	r.Post("/abs/api/login", h.handleLogin)
-	r.Post("/abs/api/auth/refresh", h.handleRefresh)
+	// Auth + probe routes: real ABS puts these at server ROOT (no /api
+	// prefix). Mobile app does `${serverAddress}/login`,
+	// `${serverAddress}/status`, etc.
+	for _, prefix := range []string{"/abs/api", ""} {
+		r.Get(prefix+"/ping", h.handlePing)
+		r.Get(prefix+"/healthcheck", h.handlePing)
+		r.Get(prefix+"/init", h.handleInit)
+		r.Get(prefix+"/status", h.handleStatus)
+		r.Post(prefix+"/login", h.handleLogin)
+		r.Post(prefix+"/auth/refresh", h.handleRefresh)
+		r.Post(prefix+"/logout", h.handleLogout)
+	}
+	// Also expose the legacy /abs/api/auth/logout shape we shipped
+	// originally — third-party tooling may still call it.
 	r.Post("/abs/api/auth/logout", h.handleLogout)
 
+	// Bearer-authenticated routes: real ABS puts these under /api. Our
+	// legacy /abs/api/* prefix and the new /api/* prefix both work.
 	r.Group(func(r chi.Router) {
 		r.Use(h.bearerAuth)
-		r.Get("/abs/api/me", h.handleMe)
-		r.Get("/abs/api/libraries", h.handleLibraries)
-		r.Get("/abs/api/libraries/{id}", h.handleLibraryDetail)
-		r.Get("/abs/api/libraries/{id}/items", h.handleLibraryItems)
-		r.Get("/abs/api/libraries/{id}/authors", h.handleLibraryAuthors)
-		r.Get("/abs/api/libraries/{id}/series", h.handleLibrarySeries)
-		r.Get("/abs/api/libraries/{id}/search", h.handleLibrarySearch)
-		r.Get("/abs/api/libraries/{id}/personalized", h.handlePersonalized)
-		r.Get("/abs/api/items/{id}", h.handleItem)
-		r.Get("/abs/api/items/{id}/cover", h.handleItemCover)
-		r.Post("/abs/api/items/{id}/play", h.handlePlay)
-		// Podcast play — episode-scoped session. Real ABS uses
-		// /api/items/{podcastId}/play/{episodeId}; ours is the same path.
-		r.Post("/abs/api/items/{id}/play/{episodeId}", h.handlePlayEpisode)
-		r.Get("/abs/api/me/progress/{itemId}", h.handleGetProgress)
-		r.Patch("/abs/api/me/progress/{itemId}", h.handlePatchProgress)
-		r.Delete("/abs/api/me/progress/{itemId}", h.handleDeleteProgress)
-		// Real ABS uses GET (not DELETE) for these — they don't remove
-		// the progress row, just toggle a visibility flag. Mirror exactly.
-		r.Get("/abs/api/me/progress/{itemId}/remove-from-continue-listening", h.handleHideFromContinue)
-		r.Get("/abs/api/me/progress/{itemId}/readd-to-continue-listening", h.handleUnhideFromContinue)
-		r.Get("/abs/api/me/items-in-progress", h.handleItemsInProgress)
-		r.Post("/abs/api/me/item/{itemId}/bookmark", h.handleCreateBookmark)
-		r.Patch("/abs/api/me/item/{itemId}/bookmark", h.handleUpdateBookmark)
-		r.Delete("/abs/api/me/item/{itemId}/bookmark/{time}", h.handleDeleteBookmark)
-		r.Patch("/abs/api/session/{sid}", h.handleSessionSync)
-		r.Post("/abs/api/session/{sid}/close", h.handleSessionClose)
+		for _, prefix := range []string{"/abs/api", "/api"} {
+			r.Post(prefix+"/authorize", h.handleAuthorize)
+			r.Get(prefix+"/me", h.handleMe)
+			r.Get(prefix+"/libraries", h.handleLibraries)
+			r.Get(prefix+"/libraries/{id}", h.handleLibraryDetail)
+			r.Get(prefix+"/libraries/{id}/items", h.handleLibraryItems)
+			r.Get(prefix+"/libraries/{id}/authors", h.handleLibraryAuthors)
+			r.Get(prefix+"/libraries/{id}/series", h.handleLibrarySeries)
+			r.Get(prefix+"/libraries/{id}/search", h.handleLibrarySearch)
+			r.Get(prefix+"/libraries/{id}/personalized", h.handlePersonalized)
+			r.Get(prefix+"/items/{id}", h.handleItem)
+			r.Get(prefix+"/items/{id}/cover", h.handleItemCover)
+			r.Post(prefix+"/items/{id}/play", h.handlePlay)
+			r.Post(prefix+"/items/{id}/play/{episodeId}", h.handlePlayEpisode)
+			r.Get(prefix+"/me/progress/{itemId}", h.handleGetProgress)
+			r.Patch(prefix+"/me/progress/{itemId}", h.handlePatchProgress)
+			r.Delete(prefix+"/me/progress/{itemId}", h.handleDeleteProgress)
+			// GET (not DELETE) on these — they toggle a visibility flag,
+			// not the underlying progress. Mirror upstream exactly.
+			r.Get(prefix+"/me/progress/{itemId}/remove-from-continue-listening", h.handleHideFromContinue)
+			r.Get(prefix+"/me/progress/{itemId}/readd-to-continue-listening", h.handleUnhideFromContinue)
+			r.Get(prefix+"/me/items-in-progress", h.handleItemsInProgress)
+			r.Post(prefix+"/me/item/{itemId}/bookmark", h.handleCreateBookmark)
+			r.Patch(prefix+"/me/item/{itemId}/bookmark", h.handleUpdateBookmark)
+			r.Delete(prefix+"/me/item/{itemId}/bookmark/{time}", h.handleDeleteBookmark)
+			r.Patch(prefix+"/session/{sid}", h.handleSessionSync)
+			r.Post(prefix+"/session/{sid}/close", h.handleSessionClose)
+		}
 	})
 
 	// Public routes — session token in query is the capability.
-	r.Get("/abs/public/session/{sid}/track/{idx}", h.handlePublicTrack)
+	// Real ABS keeps these at /public/ (no /api prefix); we mount both.
+	for _, prefix := range []string{"/abs/public", "/public"} {
+		r.Get(prefix+"/session/{sid}/track/{idx}", h.handlePublicTrack)
+	}
 }
 
 // ctxKey is the ABS auth context key.
@@ -594,15 +620,102 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID s
 		}
 		libraryMaps = append(libraryMaps, absLibraryMap(lib))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"user": map[string]any{
-			"id":               userID,
-			"username":         userID,
-			"defaultLibraryId": defaultLibraryID,
+	// Real ABS clients pattern-match on a much richer login envelope —
+	// see the audiobookshelf-app review for the full field list. Some
+	// fields are best-effort (we don't have a real "permissions" surface
+	// yet, but emitting the canonical {update, delete, download,
+	// accessExplicitContent} shape with defaults keeps the app from
+	// branching into degraded mode).
+	//
+	// x-return-tokens header opt-in: when present, include accessToken
+	// and refreshToken on the user object too (some clients read them
+	// from there, others from the top-level fields — emitting both
+	// covers every mainline reader).
+	returnTokens := strings.EqualFold(r.Header.Get("x-return-tokens"), "true")
+	user := map[string]any{
+		"id":                        userID,
+		"username":                  userID,
+		"type":                      "user", // "user" / "admin" / "root"; defaults to "user"
+		"defaultLibraryId":          defaultLibraryID,
+		"librariesAccessible":       []any{}, // empty = "all libraries"
+		"mediaProgress":             []any{},
+		"bookmarks":                 []any{},
+		"isOldToken":                false,
+		"token":                     access, // legacy field some 2.17- clients still read
+		"permissions": map[string]any{
+			"update":                true,
+			"delete":                true,
+			"download":              true,
+			"accessExplicitContent": true,
 		},
+	}
+	if returnTokens {
+		user["accessToken"] = access
+		user["refreshToken"] = refresh
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user":                 user,
+		"userDefaultLibraryId": defaultLibraryID,
+		"serverSettings": map[string]any{
+			"version":  ServerVersion,
+			"language": "en-us",
+		},
+		"ereaderDevices": []any{},
+		// Legacy top-level token fields for clients that read them
+		// directly (mainline web reads from the user object; some
+		// third-party clients still read top-level).
 		"accessToken":  access,
 		"refreshToken": refresh,
 		"libraries":    libraryMaps,
+	})
+}
+
+// handleAuthorize — POST /abs/api/authorize
+// The re-auth handshake mobile clients call on launch with their stored
+// access token. Returns the same shape as /login except WITHOUT the new
+// token pair (the client already has them). Without this endpoint the
+// app can't recover an existing session and re-prompts for credentials
+// every launch.
+func (h *Handler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	libs := h.portalLibraries(r.Context(), true)
+	libraryMaps := make([]map[string]any, 0, len(libs))
+	defaultLibraryID := VirtualLibraryID
+	for i, lib := range libs {
+		if i == 0 {
+			defaultLibraryID = absLibraryID(lib)
+		}
+		libraryMaps = append(libraryMaps, absLibraryMap(lib))
+	}
+	user := map[string]any{
+		"id":                  a.UserID,
+		"username":            a.UserID,
+		"type":                "user",
+		"defaultLibraryId":    defaultLibraryID,
+		"librariesAccessible": []any{},
+		"mediaProgress":       []any{},
+		"bookmarks":           []any{},
+		"isOldToken":          false,
+		"permissions": map[string]any{
+			"update":                true,
+			"delete":                true,
+			"download":              true,
+			"accessExplicitContent": true,
+		},
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user":                 user,
+		"userDefaultLibraryId": defaultLibraryID,
+		"serverSettings": map[string]any{
+			"version":  ServerVersion,
+			"language": "en-us",
+		},
+		"ereaderDevices": []any{},
+		"libraries":      libraryMaps,
 	})
 }
 
@@ -634,8 +747,18 @@ type refreshPayload struct {
 // "double-refresh from different IPs" as a theft signal — ABS clients
 // don't have that signal anyway.
 func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	var p refreshPayload
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil || p.RefreshToken == "" {
+	// Real ABS clients send the refresh token via the x-refresh-token
+	// header with an empty body. Our pre-existing contract accepted
+	// {refreshToken} in the JSON body; we keep that for back-compat
+	// but prefer the header when both are present.
+	refreshTok := strings.TrimSpace(r.Header.Get("x-refresh-token"))
+	if refreshTok == "" {
+		var p refreshPayload
+		if err := json.NewDecoder(r.Body).Decode(&p); err == nil {
+			refreshTok = p.RefreshToken
+		}
+	}
+	if refreshTok == "" {
 		http.Error(w, "refreshToken required", http.StatusBadRequest)
 		return
 	}
@@ -644,7 +767,7 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "config unavailable", http.StatusInternalServerError)
 		return
 	}
-	claims, err := ParseToken(cfg.ABSJWTSecret, p.RefreshToken)
+	claims, err := ParseToken(cfg.ABSJWTSecret, refreshTok)
 	if err != nil || claims.Type != "refresh" {
 		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
 		return
@@ -687,7 +810,16 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "token rotation failed", http.StatusInternalServerError)
 		return
 	}
+	// Real ABS refresh response shape is {user:{accessToken, refreshToken}}
+	// — NOT a flat token pair. Emit both forms for client compatibility:
+	// mainline app reads from user{}, third-party readers may read from
+	// the top level.
 	writeJSON(w, http.StatusOK, map[string]any{
+		"user": map[string]any{
+			"id":           claims.UserID,
+			"accessToken":  access,
+			"refreshToken": refresh,
+		},
 		"accessToken":  access,
 		"refreshToken": refresh,
 	})

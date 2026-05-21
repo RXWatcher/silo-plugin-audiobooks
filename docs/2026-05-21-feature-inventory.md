@@ -1,11 +1,11 @@
 # Feature inventory — audiobooks + ebooks plugins
 
 Date: 2026-05-21
-Status: final after triage. Cuts have been deleted from `main` —
-migrations dropped, store + handler + frontend code removed.
+Status: post-triage + SPA catch-up in progress.
 
-This is the authoritative list of what these two plugins do. Anything
-not here either never existed or was explicitly cut.
+Backend reflects the post-triage state (cuts deleted, kept features
+still on main). SPA section now lists what has UI shipped and what
+is still backend-only.
 
 ---
 
@@ -13,49 +13,49 @@ not here either never existed or was explicitly cut.
 
 ### ABS API compatibility
 
-- Dual-mount routes (root + `/api/*` + `/abs/api/*`) so the official
-  ABS apps connect without path tweaks.
-- Full login envelope (`permissions`, `librariesAccessible`,
-  `mediaProgress`, `bookmarks`, `serverSettings`, `ereaderDevices`).
-- `x-refresh-token` header convention + `/api/authorize` re-auth.
-- ServerVersion 2.26 (unlocks the mobile app's JWT path).
-- Socket `init` / `auth_failed` events + `{data}` wrapper on
-  `user_item_progress_updated`.
-- Library detail wrapper + personalized shelf entity shapes.
-- Podcast personalized shelves (recent-episodes, newest-podcasts,
-  listen-again).
-- Bookmarks CRUD on `/me/item/{id}/bookmark`.
-- Download endpoint `/api/items/{id}/file/{ino}` with Range +
-  per-ext MIME.
-- `/me/items-in-progress` + Continue-Listening management.
-- Library multi-bucket search (`{book, podcast, series, authors,
-  tags}`).
-- Plural Socket.io events (`items_added`, `library_updated`,
-  `episode_download_finished`).
-- Collections CRUD at upstream paths.
-- Playlists CRUD with episode-scoped entries.
-- Custom metadata providers (admin CRUD + proxied search).
-- RSS-feed-publish — item / series / collection renderings.
-- Share links with public audio bytes.
+- Dual-mount routes (root + `/api/*` + `/abs/api/*`)
+- Full login envelope, refresh + reauth, ServerVersion 2.26
+- Socket `init` / `auth_failed`, `{data}` wrapper on
+  `user_item_progress_updated`, plural events
+  (`items_added`, `library_updated`, `episode_download_finished`)
+- Library detail wrapper + personalized shelf shapes
+- Podcast personalized shelves
+- Bookmarks CRUD; downloads with Range; items-in-progress
+- Multi-bucket library search
+- Collections CRUD at upstream paths
+- Playlists CRUD with episode-scoped entries
+- Custom metadata providers
+- RSS-feed-publish — item / series / collection
+- Share links with public audio bytes
 
-### Features
+### Features (backend)
 
-- Sleep-timer with 30-second fade.
-- Smart Collections — rule DSL, evaluator, CRUD.
-- Embedding-based similar-items (pgvector + HNSW; OpenAI / Gemini /
-  Ollama).
-- Reading streak counter.
-- Reading-session telemetry + heatmap + year-in-review.
-- Reading goals (books + hours).
-- Per-book activity timeline.
-- Notification preferences.
-- Content restrictions / family mode.
+- Sleep-timer with 30-second fade
+- Smart Collections — DSL + evaluator + CRUD
+- Embedding similar-items (pgvector + HNSW)
+- Reading streak counter
+- Reading-session telemetry + heatmap + year-in-review
+- Reading goals (books + hours)
+- Per-book activity timeline
+- Notification preferences
+- Content restrictions / family mode
 
-### Frontend
+### Frontend (SPA)
 
-- Command palette (Cmd-K).
-- Keyboard shortcut help (?).
-- Atmosphere mode overlay.
+- Command palette (Cmd-K)
+- Keyboard shortcut help (?)
+- Atmosphere mode overlay (mounted in Layout)
+- **Smart Collections** — list + builder + live preview
+- **Stats dashboard** — streak, goals, heatmap, year-in-review
+- **Settings page** — display preferences (atmosphere toggle),
+  share-links manager, notification preferences toggle matrix
+- **Per-book activity timeline** — mounted on detail page
+
+### Still backend-only
+
+- Content restrictions (admin UI missing)
+- Custom metadata providers (admin UI missing)
+- Custom collections CRUD (existing surface, may want richer UI)
 
 ---
 
@@ -63,33 +63,46 @@ not here either never existed or was explicitly cut.
 
 ### Backend
 
-- Smart Collections (DSL + evaluator + CRUD).
-- Embedding-based similar-items.
-- `foliate-js` vendored locally.
-- Content restrictions / family mode.
-- Custom metadata providers.
-- Send-to-ereader (device registry + SMTP send).
-- Readwise.io export.
-- Hardcover.app sync.
-- Metadata enrichment (OpenLibrary + Google Books).
-- Dictionary lookup (Wiktionary).
-- In-text translation (LibreTranslate-compatible).
-- Custom font upload + serve.
-- Reading streak counter.
-- Reading goals (books).
-- Year-in-review stats.
-- Per-book activity timeline.
-- Notification preferences.
-- Share links.
-- Scheduled cleanup tasks (expired share links + recommendation
-  cache).
+- Smart Collections (DSL + evaluator + CRUD)
+- Embedding similar-items
+- `foliate-js` vendored locally
+- Content restrictions / family mode
+- Custom metadata providers
+- Send-to-ereader (device registry + SMTP send)
+- Readwise.io export
+- Hardcover.app sync
+- Metadata enrichment (OpenLibrary + Google Books)
+- Dictionary lookup (Wiktionary)
+- In-text translation (LibreTranslate)
+- Custom font upload + serve
+- Reading streak counter
+- Reading goals (books)
+- Year-in-review stats
+- Per-book activity timeline
+- Notification preferences
+- Share links
+- Scheduled cleanup tasks
 
-### Frontend
+### Frontend (SPA)
 
-- Command palette (Cmd-K).
-- Keyboard shortcut help (?).
-- Atmosphere overlay component (built; not mounted in reader yet).
-- Screen wake-lock hook (wired into reader).
-- E-ink mode hook (CSS rules in place).
-- TTS controller hook with MediaSession (built; not yet mounted as
-  a reader button).
+- Command palette (Cmd-K)
+- Keyboard shortcut help (?)
+- Reader: screen wake-lock hook, e-ink mode CSS class
+- TTS controller hook + MediaSession (built, not yet wired to a
+  reader button)
+- **Smart Collections** — list + builder + live preview
+- **Stats dashboard** — streak, goals, year-in-review
+- **Settings page** — display preferences (atmosphere + e-ink
+  toggles), e-reader devices, Readwise integration, Hardcover
+  integration, share-links manager, notification preferences
+- **Per-book activity timeline** — mounted on detail page
+
+### Still backend-only
+
+- Custom font picker (uploaded fonts not yet selectable in reader)
+- TTS "Read aloud" button (hook exists; reader button missing)
+- Dictionary popover (server route exists; reader selection-menu
+  action missing)
+- Translation popover (same)
+- Content restrictions (admin UI missing)
+- Custom metadata providers (admin UI missing)

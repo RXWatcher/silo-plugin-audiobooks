@@ -206,6 +206,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/abs/api/libraries/{id}/items", h.handleLibraryItems)
 		r.Get("/abs/api/libraries/{id}/authors", h.handleLibraryAuthors)
 		r.Get("/abs/api/libraries/{id}/series", h.handleLibrarySeries)
+		r.Get("/abs/api/libraries/{id}/search", h.handleLibrarySearch)
 		r.Get("/abs/api/libraries/{id}/personalized", h.handlePersonalized)
 		r.Get("/abs/api/items/{id}", h.handleItem)
 		r.Get("/abs/api/items/{id}/cover", h.handleItemCover)
@@ -1145,12 +1146,15 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 	// publish a slim shape rather than re-fetching progress + serialising
 	// — this is the hot path of the playback session and the consumer
 	// only needs the moved-to time.
+	// ABS clients pattern-match on the {data: ...} wrapper for this
+	// event (audiobookshelf-app plugins/server.js:124). Other events
+	// don't carry the wrapper; only user_item_progress_updated does.
 	progressPayload := map[string]any{
 		"libraryItemId": sess.BookID,
 		"currentTime":   p.CurrentTime,
 		"sessionId":     sid,
 	}
-	h.publish(a.UserID, "user_item_progress_updated", progressPayload)
+	h.publish(a.UserID, "user_item_progress_updated", map[string]any{"data": progressPayload})
 	// user_session_updated mirrors what real ABS emits on every session
 	// tick. Some clients key off session events specifically (e.g. to
 	// keep the "now playing" widget in sync with another device) — they
@@ -1378,6 +1382,157 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 		"sortDesc": false,
 		"minified": false,
 	})
+}
+
+// handleLibrarySearch mirrors ABS GET /api/libraries/{id}/search?q=&limit=.
+// Real ABS returns a multi-bucket object — clients render the buckets in
+// separate sections on the search-results screen, so a flat items array
+// would silently break their layout.
+//
+// Buckets:
+//
+//	book    — [{libraryItem, matchKey, matchText}]
+//	podcast — [{libraryItem, matchKey, matchText}] (podcasts only)
+//	series  — [{series, books[]}]
+//	authors — [{id, name, ...}]
+//	tags    — [string]            (we don't surface tags yet; empty array)
+//
+// The matchKey is the field that matched (title/author/series/narrator);
+// matchText is the highlighted excerpt to render. We fill matchKey with
+// "title" for now since the backend's ListCatalog?q= performs a fulltext
+// match without breakdown — a follow-up can widen this to per-field
+// indication once the backend exposes which field caused the hit.
+func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
+	a, _ := absAuthFrom(r)
+	lib, err := h.portalLibraryFromABSID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "library not found", http.StatusNotFound)
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	limit := 12
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	empty := map[string]any{
+		"book":    []any{},
+		"podcast": []any{},
+		"series":  []any{},
+		"authors": []any{},
+		"tags":    []any{},
+	}
+	if q == "" {
+		writeJSON(w, http.StatusOK, empty)
+		return
+	}
+
+	// Podcast libraries: search the plugin's own podcast table.
+	if lib.MediaType == "podcast" {
+		out := empty
+		podcasts, err := h.store.ListPodcasts(r.Context(), lib.ID, 0)
+		if err == nil {
+			needle := strings.ToLower(q)
+			hits := make([]map[string]any, 0)
+			for _, p := range podcasts {
+				if len(hits) >= limit {
+					break
+				}
+				if !strings.Contains(strings.ToLower(p.Title), needle) &&
+					!strings.Contains(strings.ToLower(p.Author), needle) {
+					continue
+				}
+				encoded := bookref.Encode(p.LibraryID, p.ID)
+				hits = append(hits, map[string]any{
+					"libraryItem": ToPodcastSummary(p, 0, encoded),
+					"matchKey":    "title",
+					"matchText":   p.Title,
+				})
+			}
+			out["podcast"] = hits
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	if lib.BackendPluginID == "" {
+		writeJSON(w, http.StatusOK, empty)
+		return
+	}
+	out := empty
+
+	// Books — fulltext q against the backend catalog.
+	catalog, err := h.backend.ListCatalog(r.Context(), a.Token, lib.BackendPluginID, backend.ListParams{
+		Query: q, Limit: limit, LibraryID: backendLibraryID(lib),
+	})
+	if err == nil {
+		hits := make([]map[string]any, 0, len(catalog.Items))
+		for _, s := range catalog.Items {
+			hits = append(hits, map[string]any{
+				"libraryItem": ToLibrarySummary(withPortalLibrarySummary(s, lib)),
+				"matchKey":    "title",
+				"matchText":   s.Title,
+			})
+		}
+		out["book"] = hits
+	} else {
+		h.logger.Warn("search: catalog query", "q", q, "err", err.Error())
+	}
+
+	// Series — substring match on the browse-series result. Real ABS
+	// emits each hit with the matching books inlined; we mirror the
+	// shape but leave books[] empty pending a backend "series_detail"
+	// endpoint (audiobook_backend.v1 doesn't expose series→books).
+	if series, err := h.backend.BrowseSeries(r.Context(), a.Token, lib.BackendPluginID, backend.ListParams{
+		Limit: 500, LibraryID: backendLibraryID(lib),
+	}); err == nil {
+		needle := strings.ToLower(q)
+		hits := make([]map[string]any, 0)
+		for _, s := range series.Items {
+			if len(hits) >= limit {
+				break
+			}
+			if !strings.Contains(strings.ToLower(s.Name), needle) {
+				continue
+			}
+			hits = append(hits, map[string]any{
+				"series": map[string]any{
+					"id":        s.ID,
+					"name":      s.Name,
+					"numBooks":  s.Count,
+					"libraryId": absLibraryID(lib),
+				},
+				"books": []any{},
+			})
+		}
+		out["series"] = hits
+	}
+
+	// Authors — substring match on the browse-authors result.
+	if authors, err := h.backend.BrowseAuthors(r.Context(), a.Token, lib.BackendPluginID, backend.ListParams{
+		Limit: 500, LibraryID: backendLibraryID(lib),
+	}); err == nil {
+		needle := strings.ToLower(q)
+		hits := make([]map[string]any, 0)
+		for _, s := range authors.Items {
+			if len(hits) >= limit {
+				break
+			}
+			if !strings.Contains(strings.ToLower(s.Name), needle) {
+				continue
+			}
+			hits = append(hits, map[string]any{
+				"id":        s.ID,
+				"name":      s.Name,
+				"numBooks":  s.Count,
+				"libraryId": absLibraryID(lib),
+			})
+		}
+		out["authors"] = hits
+	}
+
+	writeJSON(w, http.StatusOK, out)
 }
 
 // readPagedQuery parses the ABS ?limit=&page= query, falling back to the
@@ -1613,7 +1768,7 @@ func (h *Handler) handlePatchProgress(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		payload := podcastProgressToABS(a.UserID, updated)
-		h.publish(a.UserID, "user_item_progress_updated", payload)
+		h.publish(a.UserID, "user_item_progress_updated", map[string]any{"data": payload})
 		writeJSON(w, http.StatusOK, payload)
 		return
 	}
@@ -1651,9 +1806,10 @@ func (h *Handler) handlePatchProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := progressToABS(a.UserID, updated)
 	// Realtime push so other devices on the same account update without a
-	// poll. Event name matches the real-ABS Socket.io event so the official
-	// mobile/web clients react without any client-side changes.
-	h.publish(a.UserID, "user_item_progress_updated", payload)
+	// poll. Event name + {data} wrapper match the real-ABS Socket.io
+	// convention so the official mobile/web clients react without any
+	// client-side changes.
+	h.publish(a.UserID, "user_item_progress_updated", map[string]any{"data": payload})
 	writeJSON(w, http.StatusOK, payload)
 }
 

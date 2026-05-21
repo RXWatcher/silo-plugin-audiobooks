@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zishang520/socket.io/v2/socket"
 
@@ -119,25 +120,32 @@ func (s *Server) onConnection(client *socket.Socket) {
 	// ABS clients emit "auth" once with the access token as the payload.
 	// Until that succeeds the socket sits in the unauthenticated default
 	// namespace and receives no scoped events.
+	//
+	// Event names match the upstream ABS server (server/SocketAuthority.js):
+	// successful auth fires "init" with a user-state payload; failed auth
+	// fires "auth_failed" with {message}. The official ABS mobile + web
+	// clients listen for these specific names — emitting our own legacy
+	// "auth_authorized" / "auth_unauthorized" left them stuck on the
+	// connect screen waiting for "init" forever.
 	client.On("auth", func(args ...any) {
 		token := pickToken(args)
 		if token == "" {
 			s.logger.Warn("abssocket: auth without token", "sid", client.Id())
-			_ = client.Emit("auth_unauthorized", "missing token")
+			_ = client.Emit("auth_failed", map[string]any{"message": "missing token"})
 			client.Disconnect(true)
 			return
 		}
 		secret := s.secretFn()
 		if len(secret) == 0 {
 			s.logger.Warn("abssocket: server not ready (no jwt secret)", "sid", client.Id())
-			_ = client.Emit("auth_unauthorized", "server not ready")
+			_ = client.Emit("auth_failed", map[string]any{"message": "server not ready"})
 			client.Disconnect(true)
 			return
 		}
 		claims, err := abs.ParseToken(secret, token)
 		if err != nil || claims.Type != "access" {
 			s.logger.Warn("abssocket: auth rejected", "sid", client.Id(), "err", errString(err))
-			_ = client.Emit("auth_unauthorized", "invalid token")
+			_ = client.Emit("auth_failed", map[string]any{"message": "invalid token"})
 			client.Disconnect(true)
 			return
 		}
@@ -146,7 +154,7 @@ func (s *Server) onConnection(client *socket.Socket) {
 				row, err := st.GetABSTokenByJTI(context.Background(), claims.JTI)
 				if err != nil || row.RevokedAt != nil {
 					s.logger.Warn("abssocket: token revoked", "sid", client.Id(), "jti", claims.JTI)
-					_ = client.Emit("auth_unauthorized", "token revoked")
+					_ = client.Emit("auth_failed", map[string]any{"message": "token revoked"})
 					client.Disconnect(true)
 					return
 				}
@@ -156,8 +164,9 @@ func (s *Server) onConnection(client *socket.Socket) {
 		// fan a single in-process emit across every device on that account.
 		client.Join(userRoom(claims.UserID))
 		s.logger.Debug("abssocket: auth ok", "sid", client.Id(), "user_id", claims.UserID)
-		_ = client.Emit("auth_authorized", map[string]any{
-			"user_id": claims.UserID,
+		_ = client.Emit("init", map[string]any{
+			"userId":      claims.UserID,
+			"connectedAt": time.Now().UnixMilli(),
 		})
 	})
 

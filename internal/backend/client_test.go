@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -60,6 +61,80 @@ func TestClient_ListCatalog(t *testing.T) {
 	}
 	if len(out.Items) != 1 || out.Items[0].ID != "a" {
 		t.Errorf("env = %+v", out)
+	}
+}
+
+// TestClient_ListCatalog_FilterPushdown verifies that ListParams.Filter +
+// FilterValue land on the backend request as filter= / filter_value=
+// query params. Backends that understand the contract apply the filter
+// with an index hit; backends that don't are documented to ignore the
+// params (the plugin always re-applies the filter locally).
+func TestClient_ListCatalog_FilterPushdown(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"items":[],"total":0}`))
+	}))
+	defer srv.Close()
+	c := backend.NewClient(backend.NewHostClient(srv.URL))
+	_, err := c.ListCatalog(context.Background(), "tok", "inst-7", backend.ListParams{
+		Limit:       50,
+		LibraryID:   3,
+		Filter:      "authors",
+		FilterValue: "Brandon Sanderson",
+	})
+	if err != nil {
+		t.Fatalf("ListCatalog: %v", err)
+	}
+	// Use url.ParseQuery for ordering-independent assertion — encoded
+	// param order isn't part of the contract.
+	got, err := url.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if got.Get("filter") != "authors" {
+		t.Errorf("filter = %q, want authors", got.Get("filter"))
+	}
+	if got.Get("filter_value") != "Brandon Sanderson" {
+		t.Errorf("filter_value = %q, want Brandon Sanderson", got.Get("filter_value"))
+	}
+	if got.Get("limit") != "50" {
+		t.Errorf("limit = %q, want 50", got.Get("limit"))
+	}
+	if got.Get("library_id") != "3" {
+		t.Errorf("library_id = %q, want 3", got.Get("library_id"))
+	}
+}
+
+// TestClient_ListCatalog_FilterRequiresBothFields confirms that a Filter
+// kind without a FilterValue is dropped (and vice versa) — partial
+// filters would otherwise quietly nuke catalog responses on backends
+// that DO honor them.
+func TestClient_ListCatalog_FilterRequiresBothFields(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"items":[],"total":0}`))
+	}))
+	defer srv.Close()
+	c := backend.NewClient(backend.NewHostClient(srv.URL))
+
+	// Kind set but value empty → no filter forwarded.
+	_, _ = c.ListCatalog(context.Background(), "tok", "inst-7", backend.ListParams{
+		Limit:  10,
+		Filter: "authors",
+	})
+	if strings.Contains(gotQuery, "filter=") {
+		t.Errorf("filter forwarded with empty value: %q", gotQuery)
+	}
+
+	// Value set but kind empty → no filter forwarded either.
+	_, _ = c.ListCatalog(context.Background(), "tok", "inst-7", backend.ListParams{
+		Limit:       10,
+		FilterValue: "Sanderson",
+	})
+	if strings.Contains(gotQuery, "filter=") {
+		t.Errorf("filter forwarded with empty kind: %q", gotQuery)
 	}
 }
 

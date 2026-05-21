@@ -68,14 +68,29 @@ type Server struct {
 	connCount int // diagnostics only
 }
 
+// Options bundles the optional knobs for New so we don't keep growing the
+// positional parameter list. Empty/zero values fall back to single-replica
+// in-memory defaults.
+type Options struct {
+	// Adapter swaps the in-memory Socket.io adapter for an external one,
+	// typically a Redis adapter for multi-replica deployments. nil keeps
+	// the built-in in-memory adapter. See main.go for the Redis wiring.
+	Adapter socket.AdapterConstructor
+}
+
 // New builds a Server. secretFn is required. storeFn is optional but
 // recommended — without it, a stolen ABS JWT will continue connecting
 // even after the operator revokes it via the admin token-revoke endpoint.
-func New(secretFn SecretFn, storeFn StoreFn, logger Logger) *Server {
+// opts may be nil for default single-replica behaviour.
+func New(secretFn SecretFn, storeFn StoreFn, logger Logger, opts *Options) *Server {
 	if logger == nil {
 		logger = noopLogger{}
 	}
-	io := socket.NewServer(nil, nil)
+	srvOpts := socket.DefaultServerOptions()
+	if opts != nil && opts.Adapter != nil {
+		srvOpts.SetAdapter(opts.Adapter)
+	}
+	io := socket.NewServer(nil, srvOpts)
 	s := &Server{
 		io:       io,
 		secretFn: secretFn,

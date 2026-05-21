@@ -18,7 +18,20 @@ import (
 // Deps wires the consumer's dependencies. Resolved per-event so the store
 // can be wired after Configure runs.
 type Deps struct {
-	Store *store.Store
+	Store     *store.Store
+	Broadcast EventBroadcaster
+}
+
+// EventBroadcaster pushes a global (non-user-scoped) event to every
+// authenticated Socket.io connection. The audiobooks plugin uses this for
+// catalog mutations (item_added, item_updated, item_removed) so connected
+// ABS clients refresh their library view without polling.
+//
+// Implemented by *abssocket.Server. nil is tolerated — the consumer
+// no-ops the broadcast when no realtime hub is wired (host-proxied path,
+// tests).
+type EventBroadcaster interface {
+	Broadcast(event string, payload any)
 }
 
 // Handler implements pluginv1.EventConsumerServer.
@@ -154,7 +167,27 @@ func (h *Handler) handleImported(ctx context.Context, d *Deps, p map[string]any)
 	if err := d.Store.MarkRequestFulfilled(ctx, externalID); err != nil {
 		h.logger.Warn("mark fulfilled", "err", err)
 	}
-	_ = time.Now() // suppress unused if event doesn't always emit
+	// Broadcast item_added so connected ABS clients refresh their library
+	// view without polling. We carry the metadata the backend already
+	// emitted in the event payload (title/authors/coverPath/...). When the
+	// payload is sparse the client falls back to its next browse fetch —
+	// the event is a hint, not a state replacement.
+	if d.Broadcast != nil {
+		payload := map[string]any{
+			"libraryItemId": externalID,
+			"importedAt":    time.Now().UnixMilli(),
+		}
+		if title, ok := p["title"].(string); ok && title != "" {
+			payload["title"] = title
+		}
+		if author, ok := p["author"].(string); ok && author != "" {
+			payload["authorName"] = author
+		}
+		if cover, ok := p["cover_path"].(string); ok && cover != "" {
+			payload["coverPath"] = cover
+		}
+		d.Broadcast.Broadcast("item_added", payload)
+	}
 }
 
 func lastSegment(name string) string {

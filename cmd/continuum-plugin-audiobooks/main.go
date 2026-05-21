@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	goruntime "runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -21,6 +22,9 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5/pgxpool"
+	goredis "github.com/redis/go-redis/v9"
+	redisadapter "github.com/zishang520/socket.io-go-redis/adapter"
+	redistypes "github.com/zishang520/socket.io-go-redis/types"
 
 	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
 	publicmanifest "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/manifest"
@@ -95,6 +99,12 @@ func main() {
 	// while storePtr is nil (pre-Configure), the auth handler refuses
 	// connections rather than trusting JWTs against a missing revocation
 	// list. Mounted on the standalone listener only; see httproutes.
+	// Optional multi-replica adapter for the Socket.io hub. When the
+	// operator deploys the plugin as more than one instance behind a
+	// sticky-session-aware load balancer, set CONTINUUM_REDIS_URL so
+	// events published on replica A reach a client connected to replica
+	// B. Empty/unset → single-replica in-memory adapter (default).
+	socketOpts := buildABSSocketOptions(logger)
 	absHub := abssocket.New(
 		func() []byte {
 			st := storePtr.Load()
@@ -109,6 +119,7 @@ func main() {
 		},
 		func() *store.Store { return storePtr.Load() },
 		hclogAdapter{logger},
+		socketOpts,
 	)
 	httpSrv.SetSocketHandler(absHub.Handler())
 
@@ -270,7 +281,7 @@ func main() {
 		if st == nil {
 			return nil
 		}
-		return &consumer.Deps{Store: st}
+		return &consumer.Deps{Store: st, Broadcast: absHub}
 	}, logger)
 
 	// Scheduled tasks.
@@ -301,6 +312,40 @@ type hclogAdapter struct{ l hclog.Logger }
 
 func (a hclogAdapter) Warn(msg string, args ...any)  { a.l.Warn(msg, args...) }
 func (a hclogAdapter) Debug(msg string, args ...any) { a.l.Debug(msg, args...) }
+
+// buildABSSocketOptions constructs the optional adapter for the Socket.io
+// hub. When CONTINUUM_REDIS_URL is set, we wire a Redis adapter so events
+// published on one plugin replica reach clients connected to another.
+// Empty/unset (the single-replica default) → nil options → built-in
+// in-memory adapter.
+//
+// A malformed URL or an unreachable Redis is logged at warn level and
+// falls back to the in-memory adapter rather than failing the boot — the
+// plugin remains functional as a single-replica deployment even when
+// Redis is misconfigured.
+func buildABSSocketOptions(logger hclog.Logger) *abssocket.Options {
+	raw := strings.TrimSpace(os.Getenv("CONTINUUM_REDIS_URL"))
+	if raw == "" {
+		return nil
+	}
+	opts, err := goredis.ParseURL(raw)
+	if err != nil {
+		logger.Warn("CONTINUUM_REDIS_URL is set but unparseable; falling back to in-memory Socket.io adapter",
+			"err", err.Error())
+		return nil
+	}
+	rdb := goredis.NewClient(opts)
+	rc := redistypes.NewRedisClient(context.Background(), rdb)
+	rc.On("error", func(args ...any) {
+		logger.Warn("Socket.io Redis adapter error", "args", args)
+	})
+	return &abssocket.Options{
+		Adapter: &redisadapter.RedisAdapterBuilder{
+			Redis: rc,
+			Opts:  &redisadapter.RedisAdapterOptions{},
+		},
+	}
+}
 
 func loadManifest() (*pluginv1.PluginManifest, error) {
 	manifest, err := publicmanifest.Load(manifestRaw)

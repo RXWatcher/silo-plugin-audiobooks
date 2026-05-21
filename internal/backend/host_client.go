@@ -79,6 +79,52 @@ func (c *HostClient) Get(ctx context.Context, bearerToken, installID, pathAndQue
 	return c.do(ctx, "GET", bearerToken, installID, pathAndQuery, nil)
 }
 
+// GetStream issues a GET against the plugin proxy and returns the live
+// *http.Response so callers can stream bytes to a downstream client without
+// buffering the whole body in memory. Use this for any payload that may be
+// larger than maxResponseBytes — audio files in particular.
+//
+// Forwards the supplied extraHeaders verbatim (call sites use this to pass
+// Range, If-Match, etc. through from the inbound request). Bearer falls
+// back to the plugin's service token when empty.
+//
+// Always uses the host's HTTP-proxy path (not the SDK CallPluginHTTP RPC) —
+// CallPluginHTTP returns a single buffered []byte and can't stream. The
+// host's HTTP plugin proxy IS a real reverse-proxy and streams.
+//
+// Caller MUST resp.Body.Close() when done. Non-2xx responses are surfaced
+// as a normal *http.Response (no error) so callers can pass status codes
+// like 416 (Range Not Satisfiable) and 206 (Partial Content) through.
+func (c *HostClient) GetStream(ctx context.Context, bearerToken, installID, pathAndQuery string, extraHeaders map[string]string) (*http.Response, error) {
+	token := c.authToken(bearerToken)
+	target := c.pluginURL(installID, pathAndQuery)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, fmt.Errorf("new request: %w", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
+	// Use a no-timeout client for the stream path; the audio body can take
+	// hours for a single audiobook session. The default c.hc has a 30s
+	// timeout which would cut every playback short of finishing a chapter.
+	resp, err := streamClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do: %w", err)
+	}
+	return resp, nil
+}
+
+// streamClient is the no-timeout http.Client for GetStream. Per-request
+// cancellation comes from the ctx the caller supplies (request handlers
+// thread their r.Context() through), so we don't need a top-level deadline.
+var streamClient = &http.Client{
+	// No Timeout — see GetStream docstring.
+}
+
 // GetBinary issues a GET like Get but also returns the upstream Content-Type
 // header, so callers proxying binary payloads (cover images, etc) can preserve
 // it. Body is buffered into memory — only call this for resources expected to

@@ -18,13 +18,26 @@ type Client struct {
 func NewClient(host *HostClient) *Client { return &Client{host: host} }
 
 // ListParams mirrors the query shape for /catalog endpoints.
+//
+// Filter pushdown contract (Filter / FilterValue):
+//   The audiobooks plugin receives filter queries from ABS clients in
+//   "<kind>.<value>" form (kind=authors|series|narrators|progress|…, value
+//   is the post-decode string after the plugin handles base64 + sentinels).
+//   We forward Filter=kind and FilterValue=value to the backend so backends
+//   that understand the contract can apply filtering with an index hit
+//   instead of returning the whole catalog. Backends that don't recognise
+//   the params ignore them; the plugin always applies its own local filter
+//   on the response, so older backends still return correct (just slower)
+//   results.
 type ListParams struct {
-	Cursor    string
-	Limit     int
-	Sort      string
-	Order     string
-	Query     string
-	LibraryID int64
+	Cursor      string
+	Limit       int
+	Sort        string
+	Order       string
+	Query       string
+	LibraryID   int64
+	Filter      string // ABS filter kind, e.g. "authors", "series"
+	FilterValue string // post-decode filter value (raw, not base64)
 }
 
 func (p ListParams) toQuery() string {
@@ -46,6 +59,10 @@ func (p ListParams) toQuery() string {
 	}
 	if p.LibraryID > 0 {
 		q.Set("library_id", strconv.FormatInt(p.LibraryID, 10))
+	}
+	if p.Filter != "" && p.FilterValue != "" {
+		q.Set("filter", p.Filter)
+		q.Set("filter_value", p.FilterValue)
 	}
 	enc := q.Encode()
 	if enc == "" {

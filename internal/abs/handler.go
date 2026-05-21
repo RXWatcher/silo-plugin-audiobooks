@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/bookref"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/hostlogin"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/mediatoken"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/store"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/streaming"
 )
@@ -761,10 +763,13 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 
 	filter, hasFilter := ParseFilter(filterBy)
 
-	// Backend doesn't accept ABS filter syntax — when a filter is active we
-	// over-fetch and apply locally. Over-fetch cap is generous (5000) so
-	// medium libraries are exhaustively filtered; larger catalogs would
-	// need filter pushdown into the backend's ListCatalog contract (TODO).
+	// Filter pushdown: forward the filter kind+value to the backend so it
+	// can apply an index hit instead of returning the whole catalog.
+	// Older backends ignore the params; we still over-fetch and apply
+	// locally below so the response is correct regardless. The over-fetch
+	// cap stays generous (5000) — once backends honor filter pushdown,
+	// the over-fetch will naturally shrink because the backend already
+	// reduced the result set.
 	fetchLimit := limit
 	if hasFilter || limit == 0 {
 		fetchLimit = 5000
@@ -780,6 +785,10 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 		} else {
 			p.Order = "asc"
 		}
+	}
+	if hasFilter {
+		p.Filter = string(filter.Kind)
+		p.FilterValue = filter.Value
 	}
 
 	out, err := h.backend.ListCatalog(r.Context(), a.Token, lib.BackendPluginID, p)
@@ -1098,23 +1107,71 @@ func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no backend configured", http.StatusPreconditionFailed)
 		return
 	}
-	// Delegate to the streaming router so the redirect target carries a
-	// freshly-minted signed media token bound to (userID, bookID, fileIdx).
-	// The session-token validation above already proved the caller's right
-	// to this file; we hand off identity to the router for the signed-URL
-	// minting only.
+	// Proxy audio bytes from the backend rather than redirecting. ABS
+	// clients connected via the standalone listener cannot follow a
+	// redirect into /api/v1/plugins/<install>/... (that path lives on the
+	// continuum host, not on the standalone listener's origin). Proxying
+	// the bytes ourselves means the stream stays on the listener the
+	// client is already talking to.
 	//
-	// Known limitation: the redirect target is the backend plugin's
-	// host-proxied stream path. ABS clients connected via the standalone
-	// listener cannot follow that redirect unless the backend's stream
-	// route is reachable from the same origin (operator config). See
-	// docs/2026-05-21-standalone-abs-login.md for the follow-up needed to
-	// proxy audio bytes through the standalone listener.
-	if h.streaming == nil {
-		http.Error(w, "streaming router not configured", http.StatusInternalServerError)
+	// We still mint the signed media token — the backend's stream route
+	// validates ?token= without consulting the host's plugin proxy auth,
+	// which keeps the byte path public-routable from the backend's
+	// manifest perspective. The signature is bound to (userID, bookID,
+	// fileIdx) and expires in 15 minutes, so a leaked URL stops working
+	// quickly even though the audio response is large.
+	if cfg.MediaSigningSecret == "" {
+		http.Error(w, "media signing not configured", http.StatusServiceUnavailable)
 		return
 	}
-	h.streaming.Stream(w, r, sess.UserID, lib.BackendPluginID, backendBookID, idx)
+	mediaTok, err := mediatoken.Mint(cfg.MediaSigningSecret, sess.UserID, backendBookID, idx)
+	if err != nil {
+		http.Error(w, "mint media token", http.StatusInternalServerError)
+		return
+	}
+	backendPath := "/api/v1/stream/" + neturl.PathEscape(backendBookID) + "/" + strconv.Itoa(idx) +
+		"?token=" + neturl.QueryEscape(mediaTok)
+
+	// Forward the inbound Range header so the ABS client can seek inside
+	// the audiobook file. The backend's stream route honors Range; we just
+	// pass it through. If-Match / If-None-Match / If-Modified-Since are
+	// also passed through for caching correctness (most ABS clients don't
+	// send them but they're cheap to forward).
+	hdrs := map[string]string{}
+	for _, h := range []string{"Range", "If-Match", "If-None-Match", "If-Modified-Since"} {
+		if v := r.Header.Get(h); v != "" {
+			hdrs[h] = v
+		}
+	}
+
+	resp, err := h.backend.HostClient().GetStream(r.Context(), "", lib.BackendPluginID, backendPath, hdrs)
+	if err != nil {
+		h.logger.Warn("abs stream proxy: upstream error",
+			"book_id", backendBookID, "file_idx", idx, "err", err.Error())
+		http.Error(w, "stream unavailable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Pass through everything that matters for byte serving + caching. We
+	// don't blindly copy resp.Header because that would include hop-by-hop
+	// headers (Transfer-Encoding etc.) that Go's response writer manages
+	// itself.
+	for _, h := range []string{
+		"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges",
+		"ETag", "Last-Modified", "Cache-Control",
+	} {
+		if v := resp.Header.Get(h); v != "" {
+			w.Header().Set(h, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		// Common when the client closes the connection mid-playback
+		// (skip-forward, app backgrounded). Debug-level only.
+		h.logger.Debug("abs stream proxy: copy ended",
+			"book_id", backendBookID, "file_idx", idx, "err", err.Error())
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -177,9 +177,25 @@ SDK's `CallPluginHTTP` is request/response), so this endpoint is
 reachable only over the standalone listener — which is also where the
 official ABS mobile and web clients actually connect.
 
-Process-scope hub: a single replica today, no shared adapter. A future
-multi-replica deployment would want a Redis adapter or sticky
-load-balancing.
+Process-scope hub by default. For multi-replica deployments, set
+`CONTINUUM_REDIS_URL` (any URL accepted by `go-redis.ParseURL`) and the
+plugin will wire `zishang520/socket.io-go-redis` as the Socket.io
+adapter so events published on one replica reach clients connected to
+another. An unparseable URL or unreachable Redis logs a warning and
+falls back to the in-memory adapter rather than failing the boot — the
+plugin stays functional as a single-replica deployment.
+
+Backend-side catalog events (`audiobook_imported` on
+`bookwarehouse-audio` / `audiobook-requests`) now fan out as Socket.io
+`item_added` broadcasts via the consumer's `Broadcast` dependency, so
+connected ABS clients refresh their library view without polling.
+
+Filter pushdown: the audiobooks plugin's call to backend `ListCatalog`
+now carries `filter=<kind>` and `filter_value=<decoded>` query
+parameters when an ABS client filtered the request. Backends that
+implement the contract apply an index hit; backends that don't are
+documented to ignore the params (we still apply the filter locally on
+the response).
 
 ### Tier 3 — intentionally not implemented
 
@@ -197,31 +213,18 @@ shows real ABS doesn't standardise them either:
   audiobook-only by scope — the ebooks plugin handles ebook + podcast
   flows separately).
 
-### Standalone-listener audio streaming (open)
+### Standalone-listener audio streaming
 
-After login, ABS clients connected to the standalone listener can browse the
-catalog and load covers (covers are now proxied as bytes — see
-`internal/abs/handler.go:handleItemCover`). Audio playback, however, still
-ends in a redirect to the backend plugin's stream URL — a path under
-`/api/v1/plugins/<install>/api/v1/stream/...` that is only routable through
-the Continuum host's plugin proxy. ABS clients connected to the standalone
-listener (e.g. `abs.example.com`) cannot follow that redirect because their
-origin doesn't serve the host's plugin-proxy path space.
+ABS clients connected to the standalone listener now stream audio directly
+through the plugin: `handlePublicTrack` no longer redirects — it mints a
+signed media token, opens a `GetStream` to the backend's
+`/api/v1/stream/<id>/<idx>` route, and copies bytes back to the ABS client
+with `Range` / `Content-Range` pass-through. The `streaming.Router`'s
+redirect path is kept for the audiobook portal's own SPA, which lives on
+the host origin where the redirect target is reachable.
 
-Two ways to close the gap:
-
-1. Proxy audio bytes through the standalone listener, mirroring the
-   cover-bytes proxy. Requires a streaming variant of the host SDK's
-   `CallPluginHTTP` (current shape buffers the whole body, capped at 10 MiB;
-   useless for audiobook files). Heaviest cost on the plugin host —
-   hundreds of MiB per playback session flow through the plugin.
-2. Make the backend plugin's stream route reachable on its own public URL
-   (operator deploys `bw-audio` / `local-audiobooks` behind their own
-   reverse proxy and points the audiobooks plugin at that URL). Cheaper
-   on the plugin host but requires extra operator config.
-
-Until one of these is in place, audio playback works only when the ABS
-client is reaching the plugin via the host proxy (uncommon — the host
-proxy gates on a host session token that ABS clients don't have). The
-host-proxied path will work end-to-end for any tooling that *does* have a
-host session (e.g. the audiobooks portal's own SPA).
+Bandwidth cost is high (audiobook files flow through the plugin host) but
+that's the trade-off for letting standalone-listener clients work without
+extra operator config. A backend with its own public URL would still
+short-circuit this if the operator wants to pin the bytes to a different
+origin; we just don't require it.

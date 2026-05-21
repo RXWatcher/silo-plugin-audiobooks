@@ -37,6 +37,7 @@ func TestNew_BuildsAndExposesHandler(t *testing.T) {
 		func() []byte { return nil },
 		func() *store.Store { return nil },
 		nil, // nil logger → noop
+		nil, // default in-memory adapter
 	)
 	if s == nil {
 		t.Fatal("New returned nil")
@@ -57,6 +58,7 @@ func TestHandler_ServesSocketIOOpenHandshake(t *testing.T) {
 		func() []byte { return []byte("a-32-byte-secret-for-handshakes!") },
 		func() *store.Store { return nil },
 		&recordingLogger{},
+		nil,
 	)
 	defer s.Close()
 
@@ -83,6 +85,7 @@ func TestPublish_NoConnections_IsNoOp(t *testing.T) {
 	s := abssocket.New(
 		func() []byte { return nil },
 		func() *store.Store { return nil },
+		nil,
 		nil,
 	)
 	defer s.Close()

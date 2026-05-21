@@ -72,10 +72,11 @@ Specifically: `request_acknowledged`, `request_status_changed`, `request_fulfill
 
 ## Detailed docs
 
-- [Setup, debugging, and communication flows](docs/setup-debug-flows.md)
-- [Feature inventory](docs/2026-05-21-feature-inventory.md)
-- [Standalone ABS login](docs/2026-05-21-standalone-abs-login.md)
+- [Setup, routes, flows, and debugging](docs/setup-debug-flows.md)
+- [Operations guide](docs/operations.md)
+- [Troubleshooting](docs/troubleshooting.md)
 - [Audiobook player QA](docs/AUDIOBOOK_PLAYER_QA.md)
+- [Archive (historical specs)](docs/archive/)
 
 ## Build and release
 

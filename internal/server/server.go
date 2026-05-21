@@ -74,8 +74,11 @@ func (s *Server) Handler() http.Handler {
 		s.mountBookDropRoutes(r)
 		s.mountEnrichRoutes(r)
 		s.mountReadingGoalRoutes(r)
+		s.mountShareLinkRoutes(r)
 		s.mountStreamRoutes(r)
 	})
+	// Public share resolution — outside the auth group.
+	s.MountPublicShare(r)
 
 	if s.d.ABS != nil {
 		s.d.ABS.Mount(r)

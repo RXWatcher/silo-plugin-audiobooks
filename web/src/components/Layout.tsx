@@ -15,6 +15,8 @@ import {
 import { cn } from '@/lib/utils';
 import { CommandPaletteProvider, useCommandPalette } from '@/components/CommandPalette';
 import { ShortcutHelpProvider } from '@/components/ShortcutHelp';
+import { AtmosphereOverlay, useAtmosphereEnabled } from '@/components/AtmosphereOverlay';
+import { usePlayback } from '@/player/PlaybackProvider';
 
 export default function Layout() {
   return (
@@ -34,6 +36,7 @@ function LayoutInner() {
 
   return (
     <div className="bg-background relative min-h-[100dvh] overflow-x-hidden">
+      <Atmosphere />
       <div className="from-primary/6 pointer-events-none fixed inset-x-0 top-0 z-0 h-40 bg-gradient-to-b to-transparent blur-3xl" />
 
       <header className="glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 sm:mx-6 lg:mx-8">
@@ -82,6 +85,13 @@ function LayoutInner() {
       </main>
     </div>
   );
+}
+
+function Atmosphere() {
+  const [enabled] = useAtmosphereEnabled();
+  const playback = usePlayback();
+  if (!enabled || !playback.audiobook) return null;
+  return <AtmosphereOverlay seed={playback.audiobook.title} />;
 }
 
 function CmdKButton() {

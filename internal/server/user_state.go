@@ -27,7 +27,6 @@ func (s *Server) mountUserStateRoutes(r chi.Router) {
 	r.Post("/playback-sessions/{sid}/close", s.handleClosePlaybackSession)
 	r.Get("/audiobooks/{id}/bookmarks", s.handleListBookmarks)
 	r.Post("/audiobooks/{id}/bookmarks", s.handleCreateBookmark)
-	r.Patch("/audiobooks/{id}/bookmarks/{bm_id}", s.handleUpdateBookmark)
 	r.Delete("/audiobooks/{id}/bookmarks/{bm_id}", s.handleDeleteBookmark)
 	r.Put("/audiobooks/{id}/rating", s.handleUpsertRating)
 	r.Delete("/audiobooks/{id}/rating", s.handleDeleteRating)
@@ -356,31 +355,6 @@ func (s *Server) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 	bmID := chi.URLParam(r, "bm_id")
 	if err := s.d.Store.DeleteBookmark(r.Context(), bmID, id.UserID); err != nil {
-		writeInternal(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleUpdateBookmark — PATCH /audiobooks/{id}/bookmarks/{bm_id}
-// Updates the note/title of a bookmark in place. Position +
-// chapter_id stay fixed (the user picks the position by where they
-// were when they bookmarked it; renaming an existing mark is the
-// common edit, moving it isn't).
-func (s *Server) handleUpdateBookmark(w http.ResponseWriter, r *http.Request) {
-	id, ok := auth.RequireUser(w, r)
-	if !ok {
-		return
-	}
-	bmID := chi.URLParam(r, "bm_id")
-	var p struct {
-		Note string `json:"note"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-	if err := s.d.Store.UpdateBookmarkNote(r.Context(), bmID, id.UserID, p.Note); err != nil {
 		writeInternal(w, r, err)
 		return
 	}

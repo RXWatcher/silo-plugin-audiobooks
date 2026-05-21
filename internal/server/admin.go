@@ -164,8 +164,7 @@ func (s *Server) handleAdminListLibraries(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleAdminReplaceLibraries(w http.ResponseWriter, r *http.Request) {
-	id, ok := auth.RequireAdmin(w, r)
-	if !ok {
+	if _, ok := auth.RequireAdmin(w, r); !ok {
 		return
 	}
 	var body struct {
@@ -179,8 +178,6 @@ func (s *Server) handleAdminReplaceLibraries(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.audit(r, id.UserID, "replace_libraries", "portal_library", "",
-		map[string]any{"count": len(body.Items)})
 	// Broadcast library_updated so connected ABS clients pick up the
 	// new library layout immediately (the SPA polls /libraries
 	// independently; the mobile app waits for this event before

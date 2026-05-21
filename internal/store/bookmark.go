@@ -58,23 +58,6 @@ func (s *Store) ListBookmarks(ctx context.Context, userID, bookID string) ([]Boo
 	return out, rows.Err()
 }
 
-// UpdateBookmarkNote sets the note on an existing bookmark by id.
-// user_id pins ownership. Idempotent — updating a non-existent row
-// is not an error.
-func (s *Store) UpdateBookmarkNote(ctx context.Context, id, userID, note string) error {
-	if id == "" || userID == "" {
-		return fmt.Errorf("id, user_id required")
-	}
-	_, err := s.pool.Exec(ctx, `
-		UPDATE bookmark SET note = $1
-		WHERE id = $2 AND user_id = $3
-	`, note, id, userID)
-	if err != nil {
-		return fmt.Errorf("update bookmark note: %w", err)
-	}
-	return nil
-}
-
 // DeleteBookmark removes a bookmark by id. user_id is required for
 // authorization (the caller must already have checked ownership).
 func (s *Store) DeleteBookmark(ctx context.Context, id, userID string) error {

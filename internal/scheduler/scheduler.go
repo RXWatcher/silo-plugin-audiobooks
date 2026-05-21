@@ -13,7 +13,6 @@ import (
 	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
 
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
-	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/bookdrop"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/libsync"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/podcastfeed"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/store"
@@ -32,13 +31,9 @@ func taskID(key string) string {
 
 // Deps wires the scheduler's runtime collaborators.
 type Deps struct {
-	Store          *store.Store
-	Backend        *backend.Client
-	PodcastFeed    *podcastfeed.Refresher
-	// BookDropPath is the operator-configured directory the
-	// BookDrop scanner walks. Empty disables periodic scanning;
-	// the admin "scan now" route still works.
-	BookDropPath   string
+	Store       *store.Store
+	Backend     *backend.Client
+	PodcastFeed *podcastfeed.Refresher
 }
 
 // Server implements pluginv1.ScheduledTaskServer.
@@ -84,8 +79,6 @@ func (s *Server) Run(ctx context.Context, req *pluginv1.RunScheduledTaskRequest)
 		s.refreshPodcastFeeds(ctx, d)
 	case "purge_expired":
 		s.purgeExpired(ctx, d)
-	case "bookdrop_scan":
-		s.scanBookDrop(ctx, d)
 	default:
 		return nil, fmt.Errorf("unknown task key %q", req.GetTaskKey())
 	}
@@ -180,19 +173,3 @@ func (s *Server) purgeExpired(ctx context.Context, d *Deps) {
 	}
 }
 
-// scanBookDrop walks the configured BookDrop directory and
-// enqueues new files. Empty BookDropPath is a no-op.
-func (s *Server) scanBookDrop(ctx context.Context, d *Deps) {
-	if d.BookDropPath == "" {
-		return
-	}
-	scanner := bookdrop.New(s.logger)
-	n, err := scanner.ScanOnce(ctx, d.Store, d.BookDropPath)
-	if err != nil {
-		s.logger.Warn("bookdrop scan", "err", err.Error())
-		return
-	}
-	if n > 0 {
-		s.logger.Info("bookdrop scan complete", "files", n)
-	}
-}

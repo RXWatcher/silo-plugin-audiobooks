@@ -292,16 +292,6 @@ export const api = {
       body: JSON.stringify(body),
     }).then(jsonOrThrow<Bookmark>),
 
-  updateBookmark: (bookId: string, bookmarkId: string, body: { note: string }) =>
-    authedFetch(
-      `${apiBase()}/audiobooks/${encodeURIComponent(bookId)}/bookmarks/${encodeURIComponent(bookmarkId)}`,
-      {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      },
-    ).then(noContentOrThrow),
-
   deleteBookmark: (bookId: string, bookmarkId: string) =>
     authedFetch(
       `${apiBase()}/audiobooks/${encodeURIComponent(bookId)}/bookmarks/${encodeURIComponent(bookmarkId)}`,

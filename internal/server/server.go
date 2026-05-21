@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -17,7 +16,6 @@ import (
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/auth"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/event"
-	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/hlc"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/podcastfeed"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/store"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/streaming"
@@ -46,11 +44,7 @@ type Broadcaster interface {
 }
 
 // Server wraps the chi handler with the configured deps.
-type Server struct {
-	d             Deps
-	syncClockOnce sync.Once
-	clockCached   *hlc.Clock
-}
+type Server struct{ d Deps }
 
 // New constructs a Server from Deps.
 func New(d Deps) *Server { return &Server{d: d} }
@@ -77,18 +71,11 @@ func (s *Server) Handler() http.Handler {
 		s.mountContentRestrictionRoutes(r)
 		s.mountCustomMetadataProviderRoutes(r)
 		s.mountReadingSessionRoutes(r)
-		s.mountBookDropRoutes(r)
 		s.mountEnrichRoutes(r)
 		s.mountReadingGoalRoutes(r)
 		s.mountShareLinkRoutes(r)
-		s.mountSyncRoutes(r)
-		s.mountExportRoutes(r)
 		s.mountNotificationPrefRoutes(r)
-		s.mountAuditLogRoutes(r)
-		s.mountImportRoutes(r)
 		s.mountActivityRoutes(r)
-		s.mountLibrarySettingsRoutes(r)
-		s.mountPushSubscriptionRoutes(r)
 		s.mountStreamRoutes(r)
 	})
 	// Public share resolution — outside the auth group.

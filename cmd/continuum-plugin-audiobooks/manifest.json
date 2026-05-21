@@ -70,6 +70,12 @@
       "access": "authenticated"
     },
     {
+      "id": "abs_compat_api",
+      "method": "*",
+      "path": "/api/*",
+      "access": "authenticated"
+    },
+    {
       "id": "abs_public",
       "method": "GET",
       "path": "/abs/public/*",

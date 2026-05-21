@@ -10,6 +10,7 @@ import ChapterList from '@/components/ChapterList';
 import BookmarkList from '@/components/BookmarkList';
 import BookActivity from '@/components/BookActivity';
 import { Skeleton } from '@/components/ui/skeleton';
+import { hasHTML, renderDescriptionHTML } from '@/lib/description';
 import { usePlayback } from '@/player/PlaybackProvider';
 
 type Clip = {
@@ -158,7 +159,19 @@ export default function Detail() {
               Narrated by {a.narrators.join(', ')}
             </div>
           )}
-          {a.description && <p className="text-muted-foreground text-sm">{a.description}</p>}
+          {a.description && (
+            hasHTML(a.description) ? (
+              <div
+                className="text-muted-foreground prose prose-sm prose-invert max-w-none text-sm"
+                // Content is sanitised by DOMPurify in renderDescriptionHTML —
+                // narrow allowlist of inline/block tags, href-only on <a>,
+                // http(s)/mailto URL scheme enforced.
+                dangerouslySetInnerHTML={{ __html: renderDescriptionHTML(a.description) }}
+              />
+            ) : (
+              <p className="text-muted-foreground whitespace-pre-line text-sm">{a.description}</p>
+            )
+          )}
           <div className="text-muted-foreground flex flex-wrap gap-x-4 text-xs">
             {a.year ? <span>{a.year}</span> : null}
             {a.publisher ? <span>{a.publisher}</span> : null}

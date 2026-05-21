@@ -75,6 +75,12 @@ export default function Detail() {
     mutationFn: (bmId: string) => api.deleteBookmark(id, bmId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['audiobook', id] }),
   });
+  const renameBookmark = useMutation({
+    mutationFn: ({ bmId, note }: { bmId: string; note: string }) =>
+      api.updateBookmark(id, bmId, { note }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['audiobook', id] }),
+    onError: (err) => toast.error(`Rename failed: ${err}`),
+  });
   const closeSession = useMutation({
     mutationFn: (session: { id: string; current_time: number }) =>
       api.closePlaybackSession(session.id, { current_seconds: session.current_time }),
@@ -269,8 +275,10 @@ export default function Detail() {
         </h2>
         <BookmarkList
           bookmarks={bookmarks}
+          chapters={detail.data?.audiobook?.chapters}
           onDelete={(bmId) => removeBookmark.mutate(bmId)}
           onSelect={(position) => setSeekRequest({ id: Date.now(), position })}
+          onRename={(bmId, note) => renameBookmark.mutate({ bmId, note })}
         />
       </section>
 

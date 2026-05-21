@@ -39,6 +39,7 @@ import (
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/httproutes"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/migrate"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/podcastfeed"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/recommend"
 	pluginrt "github.com/ContinuumApp/continuum-plugin-audiobooks/internal/runtime"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/scheduler"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/server"
@@ -96,6 +97,13 @@ func main() {
 	// Podcast feed refresher — process-scoped so its HTTP client is
 	// reused across scheduler ticks and the admin force-refresh path.
 	podcastRefresher := podcastfeed.New(hclogAdapter{logger})
+
+	// Embedding-based recommender. Reads its config from the env;
+	// when EMBEDDING_BASE_URL / EMBEDDING_MODEL aren't set, the
+	// engine no-ops at every entry point so an unconfigured
+	// deployment still works (just with no /similar shelf).
+	embedCfg := recommend.LoadConfigFromEnv(os.Getenv)
+	var recommender *recommend.Engine // set inside Configure when store is ready
 
 	// Socket.io realtime hub for ABS clients. The JWT secret comes from the
 	// active backend_config (read on every auth handshake so admin rotates
@@ -191,6 +199,10 @@ func main() {
 
 		ev := event.New(sdkruntime.Host(), logger)
 
+		// Construct the recommender now that the store is wired.
+		// Reused across the ABS handler + consumer hook + scheduler.
+		recommender = recommend.New(embedCfg, st, bkClient, hclogAdapter{logger})
+
 		// ABS handler.
 		absHandler := abs.NewHandler(abs.Deps{
 			Store:     st,
@@ -209,6 +221,7 @@ func main() {
 			HostLogin:    hostLoginClient,
 			LoginLimiter: loginLimiter,
 			Publisher:    absHub,
+			Recommender:  recommender,
 		})
 
 		srv := server.New(server.Deps{

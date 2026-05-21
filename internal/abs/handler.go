@@ -36,6 +36,14 @@ type Handler struct {
 	hostLogin    HostLoginValidator
 	loginLimiter *LoginLimiter
 	publisher    EventPublisher
+	recommender  Recommender
+}
+
+// Recommender is the narrow surface the ABS handler uses to fetch
+// similar-items results. Implemented by recommend.Engine; surfaced as
+// an interface to keep the abs package decoupled from pgvector.
+type Recommender interface {
+	Similar(ctx context.Context, libraryID int64, bookID string, limit int) ([]store.SimilarAudiobook, error)
 }
 
 // EventPublisher delivers a realtime event to every Socket.io client
@@ -93,6 +101,10 @@ type Deps struct {
 	// working when the realtime hub isn't wired (tests, host-proxied
 	// flows where /socket.io isn't reachable).
 	Publisher EventPublisher
+	// Recommender powers the /items/{id}/similar endpoint. nil means
+	// embeddings aren't wired (no EMBEDDING_BASE_URL env) and the
+	// route returns an empty list.
+	Recommender Recommender
 }
 
 // NewHandler builds a handler.
@@ -118,6 +130,7 @@ func NewHandler(d Deps) *Handler {
 		hostLogin:    d.HostLogin,
 		loginLimiter: lim,
 		publisher:    d.Publisher,
+		recommender:  d.Recommender,
 	}
 }
 
@@ -235,6 +248,7 @@ func (h *Handler) Mount(r chi.Router) {
 			r.Get(prefix+"/libraries/{id}/personalized", h.handlePersonalized)
 			r.Get(prefix+"/items/{id}", h.handleItem)
 			r.Get(prefix+"/items/{id}/cover", h.handleItemCover)
+			r.Get(prefix+"/items/{id}/similar", h.handleSimilarItems)
 			r.Post(prefix+"/items/{id}/play", h.handlePlay)
 			r.Post(prefix+"/items/{id}/play/{episodeId}", h.handlePlayEpisode)
 			// File download / streaming — the mobile + web clients use

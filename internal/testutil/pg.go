@@ -13,14 +13,20 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// StartPG starts a fresh Postgres 18 container, creates the `audiobooks`
-// schema, and returns a DSN with search_path=audiobooks. Tests are skipped
-// when Docker is unavailable.
+// StartPG starts a fresh pgvector-enabled Postgres container, creates
+// the `audiobooks` schema, and returns a DSN with
+// search_path=audiobooks. Tests are skipped when Docker is unavailable.
+//
+// We use pgvector's image rather than plain postgres:18-alpine because
+// migration 0016 installs the pgvector extension for the embedding
+// surface; the plain image errors with "extension vector is not
+// available." Operators in production also need pgvector — this keeps
+// tests honest about the deployment requirement.
 func StartPG(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
 
-	c, err := tcpostgres.Run(ctx, "postgres:18-alpine",
+	c, err := tcpostgres.Run(ctx, "pgvector/pgvector:pg17",
 		tcpostgres.WithDatabase("continuum"),
 		tcpostgres.WithUsername("plugin_audiobooks"),
 		tcpostgres.WithPassword("test"),

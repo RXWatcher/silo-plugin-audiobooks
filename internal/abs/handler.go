@@ -273,6 +273,7 @@ func (h *Handler) Mount(r chi.Router) {
 			h.mountSmartCollectionRoutes(prefix, r)
 			h.mountCollectionsRoutes(prefix, r)
 			h.mountPlaylistsRoutes(prefix, r)
+			h.mountRSSFeedRoutes(prefix, r)
 		}
 	})
 
@@ -281,6 +282,8 @@ func (h *Handler) Mount(r chi.Router) {
 	for _, prefix := range []string{"/abs/public", "/public"} {
 		r.Get(prefix+"/session/{sid}/track/{idx}", h.handlePublicTrack)
 	}
+	// RSS feeds — slug in path is the capability.
+	h.MountPublicFeed(r)
 }
 
 // ctxKey is the ABS auth context key.

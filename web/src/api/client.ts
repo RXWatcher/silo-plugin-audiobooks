@@ -23,11 +23,20 @@ import type {
   Progress,
   Rating,
   SeriesSummary,
+  SmartCollection,
+  SmartCollectionQuery,
   UserRequest,
 } from './types';
 
 function apiBase(): string {
   return `${mountPath()}/api/v1`;
+}
+
+// absApiBase returns the ABS-compat /api mount (no /v1), where the
+// dual-mount ABS routes live. Smart collections and other surfaces
+// shared with the official ABS mobile apps mount here.
+function absApiBase(): string {
+  return `${mountPath()}/api`;
 }
 
 function authHeaders(): Record<string, string> {
@@ -369,6 +378,58 @@ export const api = {
       `${apiBase()}/me/collections/${encodeURIComponent(collectionId)}/items/${encodeURIComponent(bookId)}`,
       { method: 'DELETE' },
     ).then(noContentOrThrow),
+
+  // Smart Collections — rule-based dynamic collections.
+  listSmartCollections: () =>
+    authedFetch(`${absApiBase()}/me/smart-collections`).then(
+      jsonOrThrow<{ items: SmartCollection[] }>,
+    ),
+
+  getSmartCollection: (id: string) =>
+    authedFetch(
+      `${absApiBase()}/me/smart-collections/${encodeURIComponent(id)}`,
+    ).then(jsonOrThrow<SmartCollection>),
+
+  getSmartCollectionItems: (id: string, page = 0, limit = 30) =>
+    authedFetch(
+      `${absApiBase()}/me/smart-collections/${encodeURIComponent(id)}/items?page=${page}&limit=${limit}`,
+    ).then(jsonOrThrow<PageEnvelope<AudiobookSummary>>),
+
+  createSmartCollection: (body: {
+    name: string;
+    description?: string;
+    color?: string;
+    is_public?: boolean;
+    is_pinned?: boolean;
+    query_def: SmartCollectionQuery;
+  }) =>
+    authedFetch(`${absApiBase()}/me/smart-collections`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(jsonOrThrow<SmartCollection>),
+
+  updateSmartCollection: (
+    id: string,
+    body: {
+      name?: string;
+      description?: string;
+      color?: string;
+      is_public?: boolean;
+      is_pinned?: boolean;
+      query_def?: SmartCollectionQuery;
+    },
+  ) =>
+    authedFetch(`${absApiBase()}/me/smart-collections/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(jsonOrThrow<SmartCollection>),
+
+  deleteSmartCollection: (id: string) =>
+    authedFetch(`${absApiBase()}/me/smart-collections/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }).then(noContentOrThrow),
 
   // Podcasts — read endpoints (authenticated user).
   listPodcasts: (libraryID?: number) => {

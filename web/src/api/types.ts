@@ -118,6 +118,47 @@ export interface CollectionItem {
   added_at: string;
 }
 
+// Smart Collections — rule-based dynamic collections. The
+// queryDef mirrors the host's QueryDefinition shape with an
+// audiobook field/sort catalog (see internal/smartcoll/query.go).
+// Server normalises + validates; the SPA edits the same shape.
+export interface SmartCollectionRule {
+  field: string;
+  op: string;
+  value: unknown;
+}
+
+export interface SmartCollectionGroup {
+  match: 'all' | 'any';
+  rules: SmartCollectionRule[];
+}
+
+export interface SmartCollectionSort {
+  field: string;
+  order: 'asc' | 'desc';
+}
+
+export interface SmartCollectionQuery {
+  library_ids?: number[];
+  match: 'all' | 'any';
+  groups: SmartCollectionGroup[];
+  sort: SmartCollectionSort;
+  limit?: number;
+}
+
+export interface SmartCollection {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  color?: string;
+  isPublic: boolean;
+  isPinned: boolean;
+  queryDef: SmartCollectionQuery;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface PathRemap {
   source_path: string;
   target_path: string;

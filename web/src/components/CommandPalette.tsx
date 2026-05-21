@@ -22,6 +22,7 @@ import {
   Search,
   Settings,
   Smartphone,
+  Sparkles,
   Users,
 } from 'lucide-react';
 import { api } from '@/api/client';
@@ -137,6 +138,7 @@ function Palette({ close }: { close: () => void }) {
       { id: 'nav-series', label: 'Series', icon: <Layers className="size-4" />, perform: () => navigate('/series') },
       { id: 'nav-narrators', label: 'Narrators', icon: <Mic className="size-4" />, perform: () => navigate('/narrators') },
       { id: 'nav-collections', label: 'Collections', icon: <ListChecks className="size-4" />, perform: () => navigate('/collections') },
+      { id: 'nav-smart-collections', label: 'Smart collections', icon: <Sparkles className="size-4" />, perform: () => navigate('/smart-collections') },
       { id: 'nav-podcasts', label: 'Podcasts', icon: <Headphones className="size-4" />, perform: () => navigate('/podcasts') },
       { id: 'nav-requests', label: 'My Requests', icon: <ListChecks className="size-4" />, perform: () => navigate('/me/requests') },
       { id: 'nav-apps', label: 'Apps', icon: <Smartphone className="size-4" />, perform: () => navigate('/apps') },

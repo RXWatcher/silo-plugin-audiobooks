@@ -9,6 +9,7 @@ import {
   Search,
   Smartphone,
   ListChecks,
+  Sparkles,
   Users,
   Mic,
 } from 'lucide-react';
@@ -65,6 +66,7 @@ function LayoutInner() {
           <NavItem to="/series" icon={<Layers className="size-4" />} label="Series" />
           <NavItem to="/narrators" icon={<Mic className="size-4" />} label="Narrators" />
           <NavItem to="/collections" icon={<ListChecks className="size-4" />} label="Collections" />
+          <NavItem to="/smart-collections" icon={<Sparkles className="size-4" />} label="Smart" />
           <NavItem to="/podcasts" icon={<Headphones className="size-4" />} label="Podcasts" />
           <NavItem to="/me/requests" icon={<ListChecks className="size-4" />} label="My Requests" />
           <NavItem to="/apps" icon={<Smartphone className="size-4" />} label="Apps" />

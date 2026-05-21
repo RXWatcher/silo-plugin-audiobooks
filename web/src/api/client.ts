@@ -27,6 +27,7 @@ import type {
   Rating,
   ReadingGoal,
   SeriesSummary,
+  ShareLink,
   SmartCollection,
   SmartCollectionQuery,
   UserRequest,
@@ -481,6 +482,16 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ category, delivery, enabled }),
+    }).then(noContentOrThrow),
+
+  // Share links — list-revoke from the user's settings page.
+  listShareLinks: () =>
+    authedFetch(`${apiBase()}/me/share-links`).then(
+      jsonOrThrow<{ items: ShareLink[] }>,
+    ),
+  deleteShareLink: (id: string) =>
+    authedFetch(`${apiBase()}/me/share-links/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
     }).then(noContentOrThrow),
 
   // Podcasts — read endpoints (authenticated user).

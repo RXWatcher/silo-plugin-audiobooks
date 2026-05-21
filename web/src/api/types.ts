@@ -146,6 +146,19 @@ export interface SmartCollectionQuery {
   limit?: number;
 }
 
+// Share links — slug-based public capability minted by the owner
+// of an item. Expires_at can be null for "no expiry".
+export interface ShareLink {
+  id: string;
+  user_id: string;
+  slug: string;
+  item_id: string;
+  expires_at: string | null;
+  max_uses: number;
+  use_count: number;
+  created_at: string;
+}
+
 // Notification preferences — per (category, delivery) toggle.
 // Missing rows default to enabled (opt-out semantics).
 export interface NotificationPref {

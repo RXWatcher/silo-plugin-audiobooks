@@ -32,6 +32,18 @@ type Handler struct {
 	installID    func() string // current plugin install ID for building public URLs
 	hostLogin    HostLoginValidator
 	loginLimiter *LoginLimiter
+	publisher    EventPublisher
+}
+
+// EventPublisher delivers a realtime event to every Socket.io client
+// currently connected for the given userID. Implemented by abssocket.Server;
+// surfaced here as an interface so tests can stub and the package stays
+// decoupled from Socket.io transport details.
+//
+// Publishers must be non-blocking — handlers call this in the hot path of
+// REST writes and we don't want a slow socket to back up an HTTP response.
+type EventPublisher interface {
+	Publish(userID, event string, payload any)
 }
 
 // HostLoginValidator validates username/password against the Continuum host.
@@ -69,6 +81,11 @@ type Deps struct {
 	// source IP. Construct one per process (its janitor is a long-lived
 	// goroutine) and share it across plugin reconfigures.
 	LoginLimiter *LoginLimiter
+	// Publisher pushes realtime events to ABS Socket.io clients. May be
+	// nil — calls into it short-circuit, so the REST surface keeps
+	// working when the realtime hub isn't wired (tests, host-proxied
+	// flows where /socket.io isn't reachable).
+	Publisher EventPublisher
 }
 
 // NewHandler builds a handler.
@@ -93,7 +110,16 @@ func NewHandler(d Deps) *Handler {
 		targetFn: d.TargetFn, hostBaseFn: d.HostBaseFn, installID: d.InstallID,
 		hostLogin:    d.HostLogin,
 		loginLimiter: lim,
+		publisher:    d.Publisher,
 	}
+}
+
+// publish is a nil-safe wrapper around the optional EventPublisher.
+func (h *Handler) publish(userID, event string, payload any) {
+	if h.publisher == nil {
+		return
+	}
+	h.publisher.Publish(userID, event, payload)
 }
 
 // absBaseURL returns the URL prefix the ABS client should resolve any
@@ -945,6 +971,12 @@ func (h *Handler) handlePlay(w http.ResponseWriter, r *http.Request) {
 			Codec:      f.Format,
 		}
 	}
+	h.publish(a.UserID, "user_session_open", map[string]any{
+		"id":            sessionID,
+		"libraryItemId": encodedBookID,
+		"deviceId":      deviceID,
+		"mediaPlayer":   p.MediaPlayer,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":            sessionID,
 		"libraryItemId": encodedBookID,
@@ -989,6 +1021,16 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 	// un-finish a book the user explicitly marked finished.
 	_ = h.store.UpdateProgressPosition(r.Context(), a.UserID, sess.BookID, int(p.CurrentTime))
 
+	// Push the new position to the user's other connected clients. We
+	// publish a slim shape rather than re-fetching progress + serialising
+	// — this is the hot path of the playback session and the consumer
+	// only needs the moved-to time.
+	h.publish(a.UserID, "user_item_progress_updated", map[string]any{
+		"libraryItemId": sess.BookID,
+		"currentTime":   p.CurrentTime,
+		"sessionId":     sid,
+	})
+
 	resp := map[string]any{"ok": true}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1008,6 +1050,10 @@ func (h *Handler) handleSessionClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = h.store.CloseABSSession(r.Context(), sid)
+	h.publish(a.UserID, "user_session_closed", map[string]any{
+		"id":            sid,
+		"libraryItemId": sess.BookID,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1383,7 +1429,12 @@ func (h *Handler) handlePatchProgress(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, progressToABS(a.UserID, updated))
+	payload := progressToABS(a.UserID, updated)
+	// Realtime push so other devices on the same account update without a
+	// poll. Event name matches the real-ABS Socket.io event so the official
+	// mobile/web clients react without any client-side changes.
+	h.publish(a.UserID, "user_item_progress_updated", payload)
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // progressToABS shapes a store.Progress into the ABS /me/progress payload.

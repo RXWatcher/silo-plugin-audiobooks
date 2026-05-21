@@ -153,6 +153,50 @@ Down migration drops both.
   credentials instead of a portal-issued OPDS token. Same `hostlogin`
   helper, separate change.
 
+### Realtime endpoint (Socket.io)
+
+The plugin now exposes a Socket.io v4 endpoint at `/socket.io/*` on the
+standalone listener (`internal/abssocket`). ABS clients connect, then
+emit a Socket.io application event named `"auth"` whose payload is the
+access JWT minted by `/abs/api/login`. The server validates the JWT
+(signature + type + optional revocation lookup) and joins the
+connection to a user-scoped room. Subsequent server-pushed events fire
+to every device on the same account.
+
+Wired publish points:
+
+- `PATCH /abs/api/me/progress/{itemId}` → `user_item_progress_updated`
+- `PATCH /abs/api/session/{sid}` → `user_item_progress_updated`
+  (a thin payload — itemId + currentTime + sessionId — to avoid an
+  extra DB round-trip in the playback hot path)
+- `POST /abs/api/items/{id}/play` → `user_session_open`
+- `POST /abs/api/session/{sid}/close` → `user_session_closed`
+
+The Continuum host plugin proxy can't bridge websocket upgrades (the
+SDK's `CallPluginHTTP` is request/response), so this endpoint is
+reachable only over the standalone listener — which is also where the
+official ABS mobile and web clients actually connect.
+
+Process-scope hub: a single replica today, no shared adapter. A future
+multi-replica deployment would want a Redis adapter or sticky
+load-balancing.
+
+### Tier 3 — intentionally not implemented
+
+These were considered but skipped because the booklore documentation
+shows real ABS doesn't standardise them either:
+
+- Refresh-token endpoint and rotation (real ABS uses long-lived access
+  tokens; clients re-login when expired).
+- Push-notification registration (no documented spec).
+- Sharing tokens / public-link tokens (no documented spec).
+- CSRF protection (ABS mobile clients are stateless API consumers and
+  don't carry browser cookies; the host front door owns CSRF for the
+  portal SPA).
+- Podcast/episode parallel schema (the audiobooks plugin is
+  audiobook-only by scope — the ebooks plugin handles ebook + podcast
+  flows separately).
+
 ### Standalone-listener audio streaming (open)
 
 After login, ABS clients connected to the standalone listener can browse the

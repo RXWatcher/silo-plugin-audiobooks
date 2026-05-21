@@ -27,6 +27,7 @@ import (
 	sdkruntime "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/runtime"
 
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/abs"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/abssocket"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/consumer"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/event"
@@ -86,6 +87,30 @@ func main() {
 	// Constructed once at process scope so the janitor goroutine doesn't
 	// leak on each plugin reconfigure (NewHandler is called per-Configure).
 	loginLimiter := abs.NewLoginLimiter()
+
+	// Socket.io realtime hub for ABS clients. The JWT secret comes from the
+	// active backend_config (read on every auth handshake so admin rotates
+	// take effect for new connections without a plugin restart). The store
+	// is accessed via the storePtr atomic so it survives reconfigures —
+	// while storePtr is nil (pre-Configure), the auth handler refuses
+	// connections rather than trusting JWTs against a missing revocation
+	// list. Mounted on the standalone listener only; see httproutes.
+	absHub := abssocket.New(
+		func() []byte {
+			st := storePtr.Load()
+			if st == nil {
+				return nil
+			}
+			cfg, err := st.GetBackendConfig(context.Background())
+			if err != nil {
+				return nil
+			}
+			return cfg.ABSJWTSecret
+		},
+		func() *store.Store { return storePtr.Load() },
+		hclogAdapter{logger},
+	)
+	httpSrv.SetSocketHandler(absHub.Handler())
 
 	rt := pluginrt.New(manifest, func(cfg pluginrt.Config) error {
 		ctx := context.Background()
@@ -165,6 +190,7 @@ func main() {
 			InstallID:    func() string { return "continuum.audiobooks" },
 			HostLogin:    hostLoginClient,
 			LoginLimiter: loginLimiter,
+			Publisher:    absHub,
 		})
 
 		srv := server.New(server.Deps{

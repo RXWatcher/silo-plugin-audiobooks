@@ -21,6 +21,11 @@ import (
 type Server struct {
 	pluginv1.UnimplementedHttpRoutesServer
 	handler atomic.Pointer[http.Handler]
+	// socketHandler is the optional Socket.io handler routed only on the
+	// standalone HTTP listener (not via the SDK's HandleHTTP RPC). The
+	// host's plugin proxy can't bridge websocket upgrades, so Socket.io
+	// connections must land on the standalone port. Pass nil to disable.
+	socketHandler atomic.Pointer[http.Handler]
 }
 
 // NewServer constructs an unconfigured server; returns 503 until SetHandler.
@@ -33,6 +38,18 @@ func (s *Server) SetHandler(h http.Handler) {
 		return
 	}
 	s.handler.Store(&h)
+}
+
+// SetSocketHandler atomically replaces the optional Socket.io handler.
+// Only the standalone listener routes /socket.io/* through this — the
+// host-proxied HandleHTTP path ignores it because gRPC can't bridge
+// websocket upgrades.
+func (s *Server) SetSocketHandler(h http.Handler) {
+	if h == nil {
+		s.socketHandler.Store(nil)
+		return
+	}
+	s.socketHandler.Store(&h)
 }
 
 // ServeHTTP exposes the active handler to a standalone HTTP listener so
@@ -49,17 +66,32 @@ func (s *Server) SetHandler(h http.Handler) {
 // in the same shape as an anonymous, public-route request; any handler that
 // requires authenticated identity will naturally 401.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Strip the host-trust headers before doing anything else — same rule
+	// for the socket path as for the regular HTTP handler. A standalone-port
+	// client must never be able to forge identity via these headers.
+	for k := range r.Header {
+		if strings.HasPrefix(strings.ToLower(k), "x-continuum-") {
+			r.Header.Del(k)
+		}
+	}
+	// /socket.io/* on the standalone listener routes to the optional
+	// Socket.io handler. Match the exact prefix real ABS clients use.
+	if strings.HasPrefix(r.URL.Path, "/socket.io/") || r.URL.Path == "/socket.io" {
+		if sh := s.socketHandler.Load(); sh != nil {
+			(*sh).ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"socket_not_ready","message":"realtime endpoint not configured"}}`))
+		return
+	}
 	hPtr := s.handler.Load()
 	if hPtr == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"error":{"code":"not_ready","message":"plugin not configured"}}`))
 		return
-	}
-	for k := range r.Header {
-		if strings.HasPrefix(strings.ToLower(k), "x-continuum-") {
-			r.Header.Del(k)
-		}
 	}
 	(*hPtr).ServeHTTP(w, r)
 }

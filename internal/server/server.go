@@ -84,6 +84,7 @@ func (s *Server) Handler() http.Handler {
 		s.mountSyncRoutes(r)
 		s.mountExportRoutes(r)
 		s.mountNotificationPrefRoutes(r)
+		s.mountAuditLogRoutes(r)
 		s.mountStreamRoutes(r)
 	})
 	// Public share resolution — outside the auth group.

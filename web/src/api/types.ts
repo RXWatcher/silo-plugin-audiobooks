@@ -168,6 +168,53 @@ export interface ABSStandaloneOptInState {
   enabled: boolean;
 }
 
+// Podcasts — server returns the bare store row shape (snake_case via the
+// Go json tags' default rendering). Time fields arrive as RFC3339 strings.
+export interface Podcast {
+  id: string;
+  library_id: number;
+  title: string;
+  author?: string;
+  description?: string;
+  cover_url?: string;
+  language?: string;
+  explicit: boolean;
+  itunes_category?: string;
+  feed_url?: string;
+  last_refreshed_at?: string | null;
+  refresh_interval_minutes: number;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PodcastEpisode {
+  id: string;
+  podcast_id: string;
+  guid: string;
+  title: string;
+  description?: string;
+  audio_url: string;
+  audio_mime_type?: string;
+  audio_bytes?: number;
+  duration_seconds: number;
+  episode_index?: number | null;
+  season_index?: number | null;
+  published_at?: string | null;
+  cover_url?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PodcastEpisodeProgress {
+  user_id: string;
+  episode_id: string;
+  current_seconds: number;
+  progress_pct: number;
+  is_finished: boolean;
+  updated_at: string;
+}
+
 export interface ABSSession {
   id: string;
   user_id: string;

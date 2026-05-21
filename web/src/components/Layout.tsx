@@ -1,5 +1,16 @@
 import { Outlet, NavLink, useLocation } from 'react-router';
-import { ArrowLeft, BookHeadphones, Home as HomeIcon, Layers, Library, Smartphone, ListChecks, Users, Mic } from 'lucide-react';
+import {
+  ArrowLeft,
+  BookHeadphones,
+  Headphones,
+  Home as HomeIcon,
+  Layers,
+  Library,
+  Smartphone,
+  ListChecks,
+  Users,
+  Mic,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function Layout() {
@@ -37,6 +48,7 @@ export default function Layout() {
           <NavItem to="/series" icon={<Layers className="size-4" />} label="Series" />
           <NavItem to="/narrators" icon={<Mic className="size-4" />} label="Narrators" />
           <NavItem to="/collections" icon={<ListChecks className="size-4" />} label="Collections" />
+          <NavItem to="/podcasts" icon={<Headphones className="size-4" />} label="Podcasts" />
           <NavItem to="/me/requests" icon={<ListChecks className="size-4" />} label="My Requests" />
           <NavItem to="/apps" icon={<Smartphone className="size-4" />} label="Apps" />
           {/*

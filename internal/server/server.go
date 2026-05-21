@@ -16,19 +16,21 @@ import (
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/auth"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/event"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/podcastfeed"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/store"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/streaming"
 )
 
 // Deps wires the server's collaborators. SPA may be nil during early dev.
 type Deps struct {
-	Store      *store.Store
-	Backend    *backend.Client
-	Events     *event.Publisher
-	Streaming  *streaming.Router
-	ABS        *abs.Handler
-	SPA        http.Handler
-	HostBaseFn func() string
+	Store       *store.Store
+	Backend     *backend.Client
+	Events      *event.Publisher
+	Streaming   *streaming.Router
+	ABS         *abs.Handler
+	SPA         http.Handler
+	HostBaseFn  func() string
+	PodcastFeed *podcastfeed.Refresher
 }
 
 // Server wraps the chi handler with the configured deps.

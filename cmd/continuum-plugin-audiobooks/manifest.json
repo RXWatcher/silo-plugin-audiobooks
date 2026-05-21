@@ -46,6 +46,13 @@
       "id": "portal_library_sync",
       "display_name": "Sync presentation libraries from backend",
       "cron": "0 * * * *"
+    },
+    {
+      "type": "scheduled_task.v1",
+      "id": "podcast_feed_refresher",
+      "display_name": "Refresh podcast RSS feeds",
+      "description": "Walks podcasts whose refresh window has elapsed and upserts new episodes from their RSS feeds.",
+      "cron": "*/10 * * * *"
     }
   ],
   "http_routes": [

@@ -30,6 +30,7 @@ func (s *Server) mountPodcastAdminRoutes(r chi.Router) {
 	r.Delete("/admin/podcasts/{id}", s.handleDeletePodcast)
 	r.Post("/admin/podcasts/{id}/episodes", s.handleCreatePodcastEpisode)
 	r.Delete("/admin/podcasts/{id}/episodes/{episodeId}", s.handleDeletePodcastEpisode)
+	r.Post("/admin/podcasts/{id}/refresh", s.handleRefreshPodcast)
 }
 
 type podcastBody struct {
@@ -291,4 +292,29 @@ func (s *Server) handleDeletePodcastEpisode(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleRefreshPodcast(w http.ResponseWriter, r *http.Request) {
+	if _, ok := auth.RequireAdmin(w, r); !ok {
+		return
+	}
+	if s.d.PodcastFeed == nil {
+		writeError(w, http.StatusServiceUnavailable, "feed refresher not configured")
+		return
+	}
+	p, err := s.d.Store.GetPodcast(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "podcast not found")
+		return
+	}
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	if err := s.d.PodcastFeed.RefreshOne(r.Context(), s.d.Store, p); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	updated, _ := s.d.Store.GetPodcast(r.Context(), p.ID)
+	writeJSON(w, http.StatusOK, updated)
 }

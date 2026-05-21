@@ -18,6 +18,8 @@ import type {
   NarratorSummary,
   PageEnvelope,
   PlaybackSession,
+  Podcast,
+  PodcastEpisode,
   Progress,
   Rating,
   SeriesSummary,
@@ -367,6 +369,38 @@ export const api = {
       `${apiBase()}/me/collections/${encodeURIComponent(collectionId)}/items/${encodeURIComponent(bookId)}`,
       { method: 'DELETE' },
     ).then(noContentOrThrow),
+
+  // Podcasts — read endpoints (authenticated user).
+  listPodcasts: (libraryID?: number) => {
+    const q = libraryID ? `?library_id=${libraryID}` : '';
+    return authedFetch(`${apiBase()}/podcasts${q}`).then(jsonOrThrow<{ items: Podcast[] }>);
+  },
+
+  getPodcast: (id: string) =>
+    authedFetch(`${apiBase()}/podcasts/${encodeURIComponent(id)}`).then(jsonOrThrow<Podcast>),
+
+  listPodcastEpisodes: (podcastID: string) =>
+    authedFetch(
+      `${apiBase()}/podcasts/${encodeURIComponent(podcastID)}/episodes`,
+    ).then(jsonOrThrow<{ items: PodcastEpisode[] }>),
+
+  // Admin endpoints (admin role gate enforced server-side).
+  adminCreatePodcast: (body: Partial<Podcast> & { title: string; library_id: number }) =>
+    authedFetch(`${apiBase()}/admin/podcasts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(jsonOrThrow<Podcast>),
+
+  adminDeletePodcast: (id: string) =>
+    authedFetch(`${apiBase()}/admin/podcasts/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }).then(noContentOrThrow),
+
+  adminRefreshPodcast: (id: string) =>
+    authedFetch(`${apiBase()}/admin/podcasts/${encodeURIComponent(id)}/refresh`, {
+      method: 'POST',
+    }).then(jsonOrThrow<Podcast>),
 
   // ABS standalone-port body-creds login opt-in (per user).
   getABSStandaloneOptIn: () =>

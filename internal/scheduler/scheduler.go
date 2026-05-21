@@ -14,6 +14,7 @@ import (
 
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/backend"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/libsync"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/podcastfeed"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/store"
 )
 
@@ -30,8 +31,9 @@ func taskID(key string) string {
 
 // Deps wires the scheduler's runtime collaborators.
 type Deps struct {
-	Store   *store.Store
-	Backend *backend.Client
+	Store          *store.Store
+	Backend        *backend.Client
+	PodcastFeed    *podcastfeed.Refresher
 }
 
 // Server implements pluginv1.ScheduledTaskServer.
@@ -73,6 +75,8 @@ func (s *Server) Run(ctx context.Context, req *pluginv1.RunScheduledTaskRequest)
 		// No-op: cache was removed when streaming was simplified.
 	case "portal_library_sync":
 		s.syncPortalLibraries(ctx, d)
+	case "podcast_feed_refresher":
+		s.refreshPodcastFeeds(ctx, d)
 	default:
 		return nil, fmt.Errorf("unknown task key %q", req.GetTaskKey())
 	}
@@ -132,5 +136,21 @@ func (s *Server) syncPortalLibraries(ctx context.Context, d *Deps) {
 	}
 	if _, err := libsync.Sync(ctx, d.Store, d.Backend, "", target); err != nil {
 		s.logger.Warn("portal library sync", "backend", target, "err", err)
+	}
+}
+
+func (s *Server) refreshPodcastFeeds(ctx context.Context, d *Deps) {
+	if d.PodcastFeed == nil {
+		// Optional dep — single-replica deployments that don't run
+		// podcasts can leave this nil and the task is a no-op.
+		return
+	}
+	n, err := d.PodcastFeed.RefreshDue(ctx, d.Store)
+	if err != nil {
+		s.logger.Warn("podcast feed refresh", "err", err)
+		return
+	}
+	if n > 0 {
+		s.logger.Debug("refreshed podcast feeds", "attempted", n)
 	}
 }

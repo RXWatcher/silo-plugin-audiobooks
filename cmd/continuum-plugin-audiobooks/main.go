@@ -38,6 +38,7 @@ import (
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/hostlogin"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/httproutes"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/migrate"
+	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/podcastfeed"
 	pluginrt "github.com/ContinuumApp/continuum-plugin-audiobooks/internal/runtime"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/scheduler"
 	"github.com/ContinuumApp/continuum-plugin-audiobooks/internal/server"
@@ -91,6 +92,10 @@ func main() {
 	// Constructed once at process scope so the janitor goroutine doesn't
 	// leak on each plugin reconfigure (NewHandler is called per-Configure).
 	loginLimiter := abs.NewLoginLimiter()
+
+	// Podcast feed refresher — process-scoped so its HTTP client is
+	// reused across scheduler ticks and the admin force-refresh path.
+	podcastRefresher := podcastfeed.New(hclogAdapter{logger})
 
 	// Socket.io realtime hub for ABS clients. The JWT secret comes from the
 	// active backend_config (read on every auth handshake so admin rotates
@@ -207,6 +212,7 @@ func main() {
 		})
 
 		srv := server.New(server.Deps{
+			PodcastFeed: podcastRefresher,
 			Store:      st,
 			Backend:    bkClient,
 			Events:     ev,
@@ -293,8 +299,9 @@ func main() {
 			return nil
 		}
 		return &scheduler.Deps{
-			Store:   st,
-			Backend: bkClient,
+			Store:       st,
+			Backend:     bkClient,
+			PodcastFeed: podcastRefresher,
 		}
 	}, logger)
 

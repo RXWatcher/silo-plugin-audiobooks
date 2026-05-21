@@ -254,6 +254,36 @@ func (s *Store) ListPodcastEpisodes(ctx context.Context, podcastID string, limit
 	return out, rows.Err()
 }
 
+// GetPodcastEpisodesByGUID returns a map of guid → episode_id for every
+// known episode of a podcast that matches the supplied guid list. Used
+// by the feed refresher to reuse stored episode ULIDs across feed
+// refreshes (so per-user progress rows stay bound to the same row even
+// when the upstream feed re-emits an item).
+//
+// An empty guids slice short-circuits to an empty map without a query.
+func (s *Store) GetPodcastEpisodesByGUID(ctx context.Context, podcastID string, guids []string) (map[string]string, error) {
+	out := make(map[string]string, len(guids))
+	if podcastID == "" || len(guids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, guid FROM podcast_episode
+		WHERE podcast_id = $1 AND guid = ANY($2::text[])
+	`, podcastID, guids)
+	if err != nil {
+		return nil, fmt.Errorf("guids lookup: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, guid string
+		if err := rows.Scan(&id, &guid); err != nil {
+			return nil, fmt.Errorf("scan guid: %w", err)
+		}
+		out[guid] = id
+	}
+	return out, rows.Err()
+}
+
 // GetPodcastEpisode reads one episode by ID. Returns ErrNotFound on miss.
 func (s *Store) GetPodcastEpisode(ctx context.Context, id string) (PodcastEpisode, error) {
 	row := s.pool.QueryRow(ctx, `

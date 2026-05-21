@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Database, HardDrive, LibraryBig, RefreshCw, Shield } from 'lucide-react';
 import { toast } from 'sonner';
+import ContentRestrictionsTab from '@/pages/admin/ContentRestrictions';
+import CustomMetadataProvidersTab from '@/pages/admin/CustomMetadataProviders';
 
 import { api, fetchInstalledBackends, fetchRequestProviders } from '@/api/client';
 import type { InstalledBackend, UserRequest } from '@/api/types';
@@ -135,6 +137,8 @@ export default function Admin() {
           <TabsTrigger value="libraries">Libraries</TabsTrigger>
           <TabsTrigger value="requests">Requests</TabsTrigger>
           <TabsTrigger value="providers">Providers</TabsTrigger>
+          <TabsTrigger value="metadata">Metadata sources</TabsTrigger>
+          <TabsTrigger value="restrictions">Restrictions</TabsTrigger>
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
           <TabsTrigger value="tokens">Tokens</TabsTrigger>
         </TabsList>
@@ -159,6 +163,12 @@ export default function Admin() {
             providers={providers.data ?? []}
             error={providers.error instanceof Error ? providers.error.message : null}
           />
+        </TabsContent>
+        <TabsContent value="metadata">
+          <CustomMetadataProvidersTab />
+        </TabsContent>
+        <TabsContent value="restrictions">
+          <ContentRestrictionsTab />
         </TabsContent>
         <TabsContent value="sessions">
           <SessionsTab />

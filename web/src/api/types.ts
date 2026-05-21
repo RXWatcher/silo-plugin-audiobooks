@@ -174,6 +174,31 @@ export interface ShareLink {
   created_at: string;
 }
 
+// Content restrictions — admin sets per-user allow/deny rules.
+export interface ContentRestriction {
+  user_id: string;
+  library_ids?: number[];
+  blocked_genres?: string[];
+  blocked_tags?: string[];
+  blocked_authors?: string[];
+  blocked_narrators?: string[];
+  block_explicit?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// Custom metadata provider — admin-registered external HTTP search
+// endpoint that follows the upstream custom-metadata-provider spec.
+export interface CustomMetadataProvider {
+  id: string;
+  name: string;
+  url: string;
+  auth_header?: string;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 // Notification preferences — per (category, delivery) toggle.
 // Missing rows default to enabled (opt-out semantics).
 export interface NotificationPref {

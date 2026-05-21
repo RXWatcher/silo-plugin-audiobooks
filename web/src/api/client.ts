@@ -22,6 +22,8 @@ import type {
   PodcastEpisode,
   Progress,
   ActivityEvent,
+  ContentRestriction,
+  CustomMetadataProvider,
   GoalProgress,
   HeatmapResponse,
   NotificationPref,
@@ -500,6 +502,55 @@ export const api = {
     authedFetch(`${apiBase()}/me/share-links/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }).then(noContentOrThrow),
+
+  // Admin: content restrictions — per-user allow/deny rules.
+  listContentRestrictions: () =>
+    authedFetch(`${apiBase()}/admin/content-restrictions`).then(
+      jsonOrThrow<{ items: ContentRestriction[] }>,
+    ),
+  putContentRestriction: (userId: string, body: Partial<ContentRestriction>) =>
+    authedFetch(
+      `${apiBase()}/admin/content-restrictions/${encodeURIComponent(userId)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ).then(jsonOrThrow<ContentRestriction>),
+  deleteContentRestriction: (userId: string) =>
+    authedFetch(
+      `${apiBase()}/admin/content-restrictions/${encodeURIComponent(userId)}`,
+      { method: 'DELETE' },
+    ).then(noContentOrThrow),
+
+  // Admin: custom metadata providers.
+  listCustomMetadataProviders: () =>
+    authedFetch(`${apiBase()}/admin/custom-metadata-providers`).then(
+      jsonOrThrow<{ items: CustomMetadataProvider[] }>,
+    ),
+  createCustomMetadataProvider: (body: Partial<CustomMetadataProvider>) =>
+    authedFetch(`${apiBase()}/admin/custom-metadata-providers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(jsonOrThrow<CustomMetadataProvider>),
+  updateCustomMetadataProvider: (
+    id: string,
+    body: Partial<CustomMetadataProvider>,
+  ) =>
+    authedFetch(
+      `${apiBase()}/admin/custom-metadata-providers/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ).then(jsonOrThrow<CustomMetadataProvider>),
+  deleteCustomMetadataProvider: (id: string) =>
+    authedFetch(
+      `${apiBase()}/admin/custom-metadata-providers/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ).then(noContentOrThrow),
 
   // Podcasts — read endpoints (authenticated user).
   listPodcasts: (libraryID?: number) => {

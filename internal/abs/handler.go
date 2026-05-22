@@ -2155,7 +2155,7 @@ func progressToABS(userID string, p store.Progress) map[string]any {
 		"libraryItemId": p.BookID,
 		"mediaItemId":   p.BookID,
 		"currentTime":   float64(p.CurrentSeconds),
-		"duration":      0,
+		"duration":      float64(p.DurationSeconds),
 		"isFinished":    p.IsFinished,
 		"progress":      float64(p.ProgressPct),
 		"startedAt":     last,

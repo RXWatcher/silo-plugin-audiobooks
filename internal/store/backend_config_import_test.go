@@ -57,7 +57,7 @@ func TestEnsureBackendConfigDefaultsStandaloneListener(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if cfg.StandaloneHTTPListen != "127.0.0.1:9998" {
+	if cfg.StandaloneHTTPListen != "0.0.0.0:9998" {
 		t.Fatalf("unexpected standalone listener default: %q", cfg.StandaloneHTTPListen)
 	}
 }

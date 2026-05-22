@@ -15,10 +15,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	runtimehost "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/runtimehost"
 
 	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
 	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/bookref"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/hostlogin"
 	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/mediatoken"
 	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
 	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/streaming"
@@ -26,17 +29,17 @@ import (
 
 // Handler wires the /abs/api/* and /abs/public/* surface.
 type Handler struct {
-	store        *store.Store
-	backend      *backend.Client
-	streaming    *streaming.Router
-	logger       Logger
-	targetFn     func(ctx context.Context) (string, store.BackendConfig, error)
-	hostBaseFn   func() string
-	installID    func() string // current plugin install ID for building public URLs
-	hostLogin    HostLoginValidator
-	loginLimiter *LoginLimiter
-	publisher    EventPublisher
-	recommender  Recommender
+	store         *store.Store
+	backend       *backend.Client
+	streaming     *streaming.Router
+	logger        Logger
+	targetFn      func(ctx context.Context) (string, store.BackendConfig, error)
+	hostBaseFn    func() string
+	installID     func() string // current plugin install ID for building public URLs
+	credValidator ProfileCredentialValidator
+	loginLimiter  *LoginLimiter
+	publisher     EventPublisher
+	recommender   Recommender
 }
 
 // Recommender is the narrow surface the ABS handler uses to fetch
@@ -61,10 +64,11 @@ type EventPublisher interface {
 	Broadcast(event string, payload any)
 }
 
-// HostLoginValidator validates username/password against the Continuum host.
-// Implemented by hostlogin.Client; surfaced as an interface so tests can stub.
-type HostLoginValidator interface {
-	Validate(ctx context.Context, username, password, deviceName, ip string) (hostlogin.Result, error)
+// ProfileCredentialValidator resolves a third-party "user#profile" /
+// "password#pin" login against the Continuum host. Implemented by the
+// SDK runtimehost client; an interface so tests can stub it.
+type ProfileCredentialValidator interface {
+	ValidateProfileCredential(ctx context.Context, username, password string) (*runtimehost.ProfileCredential, error)
 }
 
 // Logger is a minimal interface to keep Handler decoupled from hclog.
@@ -88,10 +92,11 @@ type Deps struct {
 	TargetFn   func(ctx context.Context) (string, store.BackendConfig, error)
 	HostBaseFn func() string
 	InstallID  func() string
-	// HostLogin validates body-creds against the Continuum host's
-	// /api/v1/auth/login endpoint. May be nil; when nil, the body-creds
-	// login path returns 503 regardless of admin mode.
-	HostLogin HostLoginValidator
+	// CredValidator resolves standalone-port body credentials against the
+	// Continuum host via the ValidateProfileCredential RPC. May be nil;
+	// when nil, the body-creds login path returns 503 regardless of admin
+	// mode.
+	CredValidator ProfileCredentialValidator
 	// LoginLimiter throttles standalone-port body-creds login attempts per
 	// source IP. Construct one per process (its janitor is a long-lived
 	// goroutine) and share it across plugin reconfigures.
@@ -127,10 +132,10 @@ func NewHandler(d Deps) *Handler {
 	return &Handler{
 		store: d.Store, backend: d.Backend, streaming: d.Streaming, logger: d.Logger,
 		targetFn: d.TargetFn, hostBaseFn: d.HostBaseFn, installID: d.InstallID,
-		hostLogin:    d.HostLogin,
-		loginLimiter: lim,
-		publisher:    d.Publisher,
-		recommender:  d.Recommender,
+		credValidator: d.CredValidator,
+		loginLimiter:  lim,
+		publisher:     d.Publisher,
+		recommender:   d.Recommender,
 	}
 }
 
@@ -502,42 +507,45 @@ func (h *Handler) handleStatus(w http.ResponseWriter, _ *http.Request) {
 // A per-IP rate limiter throttles body-creds attempts. The host-proxied
 // branch is never rate-limited.
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
+	// Path A — host-proxied: the host stamped identity headers.
 	if userID := r.Header.Get("X-Continuum-User-Id"); userID != "" {
-		h.completeLogin(w, r, userID, r.Header.Get("X-Continuum-User-Name"))
+		profileID := r.Header.Get("X-Continuum-Profile-Id") // empty = primary
+		name := r.Header.Get("X-Continuum-Profile-Name")
+		if name == "" {
+			name = r.Header.Get("X-Continuum-User-Name")
+		}
+		h.completeLogin(w, r, userID, profileID, name)
 		return
 	}
+	// Path B — standalone port: validate body credentials via the host RPC.
 	h.handleStandaloneLogin(w, r)
 }
 
 // handleStandaloneLogin runs the body-creds path when no host-proxied
-// identity header is present.
+// identity header is present. Credentials are resolved against the
+// Continuum host's ValidateProfileCredential RPC, which owns all
+// "user#profile" / "password#pin" parsing and verification.
 func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) {
 	_, cfg, err := h.targetFn(r.Context())
 	if err != nil {
 		http.Error(w, "config unavailable", http.StatusInternalServerError)
 		return
 	}
-	mode := store.NormalizeStandaloneLoginMode(cfg.StandaloneLoginMode)
-	if mode == store.StandaloneLoginModeDisabled {
-		http.Error(w, "login must be initiated via the continuum host; standalone /login is not accepted", http.StatusUnauthorized)
+	if store.NormalizeStandaloneLoginMode(cfg.StandaloneLoginMode) == store.StandaloneLoginModeDisabled {
+		http.Error(w, "standalone login is disabled on this server", http.StatusUnauthorized)
 		return
 	}
-	if h.hostLogin == nil {
-		// Mode says body-creds is allowed but the deployment didn't wire a
-		// host-login client. Fail closed loudly so the operator notices.
-		h.logger.Warn("abs.standalone_login: no host-login client configured", "mode", mode)
+	if h.credValidator == nil {
+		h.logger.Warn("abs.standalone_login: no credential validator configured")
 		http.Error(w, "standalone login is unavailable in this deployment", http.StatusServiceUnavailable)
 		return
 	}
-
 	ip := clientIP(r)
 	if !h.loginLimiter.allow(ip) {
-		h.logger.Warn("abs.standalone_login: rate limited", "ip", ip, "mode", mode)
 		w.Header().Set("Retry-After", "60")
 		http.Error(w, "too many login attempts; try again shortly", http.StatusTooManyRequests)
 		return
 	}
-
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -550,43 +558,27 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "username and password are required", http.StatusUnauthorized)
 		return
 	}
-
-	res, err := h.hostLogin.Validate(r.Context(), body.Username, body.Password, r.UserAgent(), ip)
+	// The plugin never parses '#': the host owns username#profile /
+	// password#pin parsing inside ValidateProfileCredential.
+	cred, err := h.credValidator.ValidateProfileCredential(r.Context(), body.Username, body.Password)
 	if err != nil {
-		if errors.Is(err, hostlogin.ErrInvalidCredentials) {
-			h.logger.Warn("abs.standalone_login: invalid credentials",
-				"ip", ip, "username", body.Username, "mode", mode)
+		switch status.Code(err) {
+		case codes.Unauthenticated:
+			h.logger.Warn("abs.standalone_login: invalid credentials", "ip", ip, "username", body.Username)
 			http.Error(w, "invalid username or password", http.StatusUnauthorized)
-			return
+		default:
+			h.logger.Warn("abs.standalone_login: validator error", "ip", ip, "err", err.Error())
+			http.Error(w, "login service unavailable", http.StatusServiceUnavailable)
 		}
-		h.logger.Warn("abs.standalone_login: upstream error",
-			"ip", ip, "username", body.Username, "mode", mode, "err", err.Error())
-		http.Error(w, "upstream login unavailable", http.StatusBadGateway)
 		return
 	}
-
-	if mode == store.StandaloneLoginModeOptIn {
-		ok, hErr := h.store.HasStandaloneOptIn(r.Context(), res.UserID)
-		if hErr != nil {
-			h.logger.Warn("abs.standalone_login: opt-in lookup failed",
-				"ip", ip, "user_id", res.UserID, "err", hErr.Error())
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if !ok {
-			h.logger.Warn("abs.standalone_login: user not opted in",
-				"ip", ip, "user_id", res.UserID)
-			writeJSON(w, http.StatusUnauthorized, map[string]any{
-				"error":   "not_enabled_for_mobile_login",
-				"message": "Mobile-app login is not enabled for this account. Enable it from the audiobooks portal under account settings.",
-			})
-			return
-		}
+	// Display name: the profile portion of the typed username (after '#'),
+	// else the whole username.
+	displayName := body.Username
+	if i := strings.LastIndexByte(displayName, '#'); i >= 0 && i < len(displayName)-1 {
+		displayName = displayName[i+1:]
 	}
-
-	h.logger.Debug("abs.standalone_login: success",
-		"ip", ip, "user_id", res.UserID, "mode", mode)
-	h.completeLogin(w, r, res.UserID, res.DisplayName)
+	h.completeLogin(w, r, cred.UserID, cred.ProfileID, displayName)
 }
 
 // AbsServerSettings is the serverSettings envelope ABS clients read on
@@ -657,7 +649,7 @@ func (h *Handler) absUserObject(ctx context.Context, userID, displayName, defaul
 // completeLogin mints ABS access + refresh JWTs for the validated user and
 // writes the login response. Shared by both the header path and the
 // body-creds path so the response shape is identical.
-func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, displayName string) {
+func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, profileID, displayName string) {
 	_, cfg, err := h.targetFn(r.Context())
 	if err != nil {
 		http.Error(w, "config unavailable", http.StatusInternalServerError)
@@ -673,12 +665,12 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 	}
 	accessJTI := ulid.Make().String()
 	refreshJTI := ulid.Make().String()
-	access, err := IssueAccessToken(cfg.ABSJWTSecret, userID, "", accessJTI, accessTTL)
+	access, err := IssueAccessToken(cfg.ABSJWTSecret, userID, profileID, accessJTI, accessTTL)
 	if err != nil {
 		http.Error(w, "mint access: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	refresh, err := IssueRefreshToken(cfg.ABSJWTSecret, userID, "", refreshJTI, refreshTTL)
+	refresh, err := IssueRefreshToken(cfg.ABSJWTSecret, userID, profileID, refreshJTI, refreshTTL)
 	if err != nil {
 		http.Error(w, "mint refresh: "+err.Error(), http.StatusInternalServerError)
 		return

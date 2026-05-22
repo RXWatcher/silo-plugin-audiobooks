@@ -35,7 +35,6 @@ import (
 	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
 	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/consumer"
 	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/event"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/hostlogin"
 	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/httproutes"
 	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/migrate"
 	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/podcastfeed"
@@ -65,8 +64,8 @@ func main() {
 	var (
 		poolPtr          atomic.Pointer[pgxpool.Pool]
 		storePtr         atomic.Pointer[store.Store]
-		standaloneOnce   sync.Once
-		standaloneAddr   atomic.Value // string; tracks the bound addr so reconfigures can warn on change
+		standaloneMu     sync.Mutex   // serialises standalone-listener rebinds across Configure calls
+		standaloneAddr   atomic.Value // string; the addr the listener is currently bound to
 		standaloneSrvPtr atomic.Pointer[http.Server]
 	)
 
@@ -82,12 +81,6 @@ func main() {
 	}
 	hostToken := os.Getenv("CONTINUUM_PLUGIN_TOKEN")
 	bkClient := backend.NewClient(backend.NewHostClient(hostBase).WithServiceToken(hostToken).WithRuntimeHost(sdkruntime.Host()))
-
-	// Host-login client used by the ABS standalone-port body-creds path. It
-	// posts to {hostBase}/api/v1/auth/login with provider="local". When
-	// hostBase is unreachable the handler returns 502, so the client is safe
-	// to construct eagerly.
-	hostLoginClient := hostlogin.New(hostBase)
 
 	// Per-IP rate limiter for the standalone-port body-creds login path.
 	// Constructed once at process scope so the janitor goroutine doesn't
@@ -223,12 +216,12 @@ func main() {
 				}
 				return cfg.BackendInstallID(), cfg, nil
 			},
-			HostBaseFn:   func() string { return hostBase },
-			InstallID:    func() string { return "continuum.audiobooks" },
-			HostLogin:    hostLoginClient,
-			LoginLimiter: loginLimiter,
-			Publisher:    absHub,
-			Recommender:  recommender,
+			HostBaseFn:    func() string { return hostBase },
+			InstallID:     func() string { return "continuum.audiobooks" },
+			CredValidator: sdkruntime.Host(),
+			LoginLimiter:  loginLimiter,
+			Publisher:     absHub,
+			Recommender:   recommender,
 		})
 
 		srv := server.New(server.Deps{
@@ -244,36 +237,46 @@ func main() {
 		})
 		httpSrv.SetHandler(srv.Handler())
 
-		// Optional standalone HTTP listener for direct client apps. The value
-		// lives in backend_config and is managed by the admin SPA. Bound once
-		// at first Configure; subsequent changes require a plugin restart.
-		if addr := bcfg.StandaloneHTTPListen; addr != "" {
-			started := false
-			standaloneOnce.Do(func() {
-				started = true
-				standaloneAddr.Store(addr)
-				sl := &http.Server{
-					Addr:              addr,
-					Handler:           httpSrv,
-					ReadHeaderTimeout: 10 * time.Second,
-					ReadTimeout:       60 * time.Second,
-					WriteTimeout:      120 * time.Second,
-					IdleTimeout:       120 * time.Second,
-				}
-				standaloneSrvPtr.Store(sl)
-				go func() {
-					logger.Info("standalone http listener starting", "addr", addr)
-					if err := sl.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-						logger.Error("standalone http listener failed", "addr", addr, "err", err)
+		// Standalone HTTP listener for direct ABS client apps. The bind
+		// address lives in backend_config and is managed by the admin SPA.
+		// When it changes — including the first Configure — drain the old
+		// listener and start a fresh one so an edit takes effect without a
+		// manual plugin restart. (The previous sync.Once binding froze the
+		// addr at first boot, so a later SPA/DB change silently never
+		// applied — see docs/2026-05-21-standalone-abs-login.md.)
+		{
+			addr := bcfg.StandaloneHTTPListen
+			standaloneMu.Lock()
+			prev, _ := standaloneAddr.Load().(string)
+			if prev != addr {
+				if old := standaloneSrvPtr.Swap(nil); old != nil {
+					logger.Info("standalone http listener rebinding", "from", prev, "to", addr)
+					drainCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					if err := old.Shutdown(drainCtx); err != nil {
+						logger.Warn("standalone http listener drain returned error", "err", err)
 					}
-				}()
-			})
-			if !started {
-				if prev, _ := standaloneAddr.Load().(string); prev != addr {
-					logger.Warn("standalone_http_listen changed; restart the plugin to apply",
-						"current", prev, "requested", addr)
+					cancel()
+				}
+				standaloneAddr.Store(addr)
+				if addr != "" {
+					sl := &http.Server{
+						Addr:              addr,
+						Handler:           httpSrv,
+						ReadHeaderTimeout: 10 * time.Second,
+						ReadTimeout:       60 * time.Second,
+						WriteTimeout:      120 * time.Second,
+						IdleTimeout:       120 * time.Second,
+					}
+					standaloneSrvPtr.Store(sl)
+					go func() {
+						logger.Info("standalone http listener starting", "addr", addr)
+						if err := sl.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+							logger.Error("standalone http listener failed", "addr", addr, "err", err)
+						}
+					}()
 				}
 			}
+			standaloneMu.Unlock()
 		}
 
 		storePtr.Store(st)

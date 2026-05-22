@@ -102,9 +102,10 @@ func (f *authFixture) login(userID string) string {
 
 // TestHandleLogin_RejectsMissingIdentity verifies the auth-bypass fix:
 // POSTing /login without the host-injected X-Continuum-User-Id header must
-// 401 with the spelled-out "standalone /login is not accepted" error. This
-// is the security guarantee — any change that allows body-supplied identity
-// reopens the bypass and must fail this test.
+// 401 when standalone login is disabled (the default backend_config mode).
+// This is the security guarantee — any change that allows body-supplied
+// identity through the disabled gate reopens the bypass and must fail this
+// test.
 func TestHandleLogin_RejectsMissingIdentity(t *testing.T) {
 	f := newAuthFixture(t)
 	status, body := f.do("POST", "/abs/api/login",
@@ -113,8 +114,8 @@ func TestHandleLogin_RejectsMissingIdentity(t *testing.T) {
 	if status != 401 {
 		t.Fatalf("status = %d, want 401", status)
 	}
-	if !strings.Contains(body, "standalone /login is not accepted") {
-		t.Errorf("body = %q, want it to mention 'standalone /login is not accepted'", body)
+	if !strings.Contains(body, "standalone login is disabled") {
+		t.Errorf("body = %q, want it to mention 'standalone login is disabled'", body)
 	}
 }
 

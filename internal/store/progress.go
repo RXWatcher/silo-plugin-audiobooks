@@ -11,12 +11,13 @@ import (
 
 // Progress mirrors the progress table.
 type Progress struct {
-	UserID         string
-	BookID         string
-	CurrentSeconds int
-	ProgressPct    float32
-	IsFinished     bool
-	UpdatedAt      time.Time
+	UserID          string
+	BookID          string
+	CurrentSeconds  int
+	DurationSeconds int
+	ProgressPct     float32
+	IsFinished      bool
+	UpdatedAt       time.Time
 }
 
 // UpdateProgressPosition records only the playback position for a
@@ -47,14 +48,15 @@ func (s *Store) UpsertProgress(ctx context.Context, p Progress) error {
 		return fmt.Errorf("user_id and book_id required")
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO progress (user_id, book_id, current_seconds, progress_pct, is_finished, updated_at)
-		VALUES ($1, $2, $3, $4, $5, now())
+		INSERT INTO progress (user_id, book_id, current_seconds, duration_seconds, progress_pct, is_finished, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, now())
 		ON CONFLICT (user_id, book_id) DO UPDATE SET
-			current_seconds = EXCLUDED.current_seconds,
-			progress_pct    = EXCLUDED.progress_pct,
-			is_finished     = EXCLUDED.is_finished,
-			updated_at      = now()
-	`, p.UserID, p.BookID, p.CurrentSeconds, p.ProgressPct, p.IsFinished)
+			current_seconds  = EXCLUDED.current_seconds,
+			duration_seconds = EXCLUDED.duration_seconds,
+			progress_pct     = EXCLUDED.progress_pct,
+			is_finished      = EXCLUDED.is_finished,
+			updated_at       = now()
+	`, p.UserID, p.BookID, p.CurrentSeconds, p.DurationSeconds, p.ProgressPct, p.IsFinished)
 	if err != nil {
 		return fmt.Errorf("upsert progress: %w", err)
 	}
@@ -64,11 +66,11 @@ func (s *Store) UpsertProgress(ctx context.Context, p Progress) error {
 // GetProgress reads one (user_id, book_id) row.
 func (s *Store) GetProgress(ctx context.Context, userID, bookID string) (Progress, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT user_id, book_id, current_seconds, progress_pct, is_finished, updated_at
+		SELECT user_id, book_id, current_seconds, duration_seconds, progress_pct, is_finished, updated_at
 		FROM progress WHERE user_id = $1 AND book_id = $2
 	`, userID, bookID)
 	var p Progress
-	if err := row.Scan(&p.UserID, &p.BookID, &p.CurrentSeconds, &p.ProgressPct, &p.IsFinished, &p.UpdatedAt); err != nil {
+	if err := row.Scan(&p.UserID, &p.BookID, &p.CurrentSeconds, &p.DurationSeconds, &p.ProgressPct, &p.IsFinished, &p.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Progress{}, ErrNotFound
 		}
@@ -85,7 +87,7 @@ func (s *Store) ListInProgress(ctx context.Context, userID string, limit int) ([
 		limit = 25
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT user_id, book_id, current_seconds, progress_pct, is_finished, updated_at
+		SELECT user_id, book_id, current_seconds, duration_seconds, progress_pct, is_finished, updated_at
 		FROM progress
 		WHERE user_id = $1
 		  AND is_finished = FALSE
@@ -100,7 +102,7 @@ func (s *Store) ListInProgress(ctx context.Context, userID string, limit int) ([
 	out := make([]Progress, 0, limit)
 	for rows.Next() {
 		var p Progress
-		if err := rows.Scan(&p.UserID, &p.BookID, &p.CurrentSeconds, &p.ProgressPct, &p.IsFinished, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.UserID, &p.BookID, &p.CurrentSeconds, &p.DurationSeconds, &p.ProgressPct, &p.IsFinished, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan in-progress: %w", err)
 		}
 		out = append(out, p)
@@ -164,7 +166,7 @@ func (s *Store) ListRecentProgress(ctx context.Context, userID string, limit int
 		limit = 20
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT user_id, book_id, current_seconds, progress_pct, is_finished, updated_at
+		SELECT user_id, book_id, current_seconds, duration_seconds, progress_pct, is_finished, updated_at
 		FROM progress WHERE user_id = $1
 		ORDER BY updated_at DESC LIMIT $2
 	`, userID, limit)
@@ -175,7 +177,7 @@ func (s *Store) ListRecentProgress(ctx context.Context, userID string, limit int
 	out := make([]Progress, 0, limit)
 	for rows.Next() {
 		var p Progress
-		if err := rows.Scan(&p.UserID, &p.BookID, &p.CurrentSeconds, &p.ProgressPct, &p.IsFinished, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.UserID, &p.BookID, &p.CurrentSeconds, &p.DurationSeconds, &p.ProgressPct, &p.IsFinished, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan progress: %w", err)
 		}
 		out = append(out, p)

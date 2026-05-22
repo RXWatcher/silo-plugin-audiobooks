@@ -70,6 +70,7 @@ func (s *Server) handleCreateCollection(w http.ResponseWriter, r *http.Request) 
 	c := store.Collection{
 		ID:          ulid.Make().String(),
 		UserID:      id.UserID,
+		ProfileID:   profileID(r),
 		Name:        p.Name,
 		Color:       p.Color,
 		IsPublic:    p.IsPublic,

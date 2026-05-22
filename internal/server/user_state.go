@@ -70,6 +70,7 @@ func (s *Server) handleUpsertProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.d.Store.UpsertProgress(r.Context(), store.Progress{
 		UserID:         id.UserID,
+		ProfileID:      profileID(r),
 		BookID:         bookID,
 		CurrentSeconds: p.CurrentSeconds,
 		ProgressPct:    p.ProgressPct,
@@ -153,6 +154,7 @@ func (s *Server) handleCreatePlaybackSession(w http.ResponseWriter, r *http.Requ
 	sess := store.ABSSession{
 		ID:          ulid.Make().String(),
 		UserID:      id.UserID,
+		ProfileID:   profileID(r),
 		BookID:      bookID,
 		DeviceID:    deviceID,
 		DeviceInfo:  info,
@@ -278,6 +280,7 @@ func (s *Server) syncPlaybackProgress(r *http.Request, userID, bookID string, cu
 	}
 	return s.d.Store.UpsertProgress(r.Context(), store.Progress{
 		UserID:         userID,
+		ProfileID:      profileID(r),
 		BookID:         bookID,
 		CurrentSeconds: current,
 		ProgressPct:    progressPct,
@@ -336,6 +339,7 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 	bk := store.Bookmark{
 		ID:              ulid.Make().String(),
 		UserID:          id.UserID,
+		ProfileID:       profileID(r),
 		BookID:          bookID,
 		PositionSeconds: p.PositionSeconds,
 		ChapterID:       p.ChapterID,

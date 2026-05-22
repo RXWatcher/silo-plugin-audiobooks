@@ -86,6 +86,14 @@ func jsonReq(method, path string, hdr map[string]string, body string) *http.Requ
 var (
 	asUser  = map[string]string{"X-Continuum-User-Id": "alice", "X-Continuum-User-Role": "user"}
 	asAdmin = map[string]string{"X-Continuum-User-Id": "root", "X-Continuum-User-Role": "admin"}
+	// asUserKids is alice acting under a non-primary profile. The host proxy
+	// stamps the active profile as X-Continuum-Profile-Id; an empty value
+	// (asUser) means the primary profile.
+	asUserKids = map[string]string{
+		"X-Continuum-User-Id":    "alice",
+		"X-Continuum-User-Role":  "user",
+		"X-Continuum-Profile-Id": "kids",
+	}
 )
 
 func TestAuthGating(t *testing.T) {
@@ -477,6 +485,83 @@ func TestWriteInternalOpacity(t *testing.T) {
 	if !strings.Contains(log, "err=") {
 		t.Fatalf("underlying error not logged: %s", log)
 	}
+}
+
+// A write made under a non-primary profile must be stored against that
+// profile, so the same profile reads it back and the primary profile does
+// not. The store filters every query by profile_id; this guards the handler
+// layer, which is what must stamp the active profile onto each insert.
+func TestProfileScopedWritesAreIsolatedByProfile(t *testing.T) {
+	h, _ := liveServer(t)
+
+	// itemsLen GETs path as the given identity and returns the length of
+	// the JSON {"items":[...]} envelope every list endpoint here returns.
+	itemsLen := func(path string, who map[string]string) int {
+		t.Helper()
+		w := do(h, req("GET", path, who))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d body=%s, want 200", path, w.Code, w.Body)
+		}
+		var out struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+		return len(out.Items)
+	}
+
+	t.Run("collections", func(t *testing.T) {
+		w := do(h, jsonReq("POST", "/api/v1/me/collections", asUserKids, `{"name":"Bedtime stories"}`))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create collection = %d body=%s, want 201", w.Code, w.Body)
+		}
+		if n := itemsLen("/api/v1/me/collections", asUserKids); n != 1 {
+			t.Fatalf("kids profile sees %d collections, want 1 (its own write)", n)
+		}
+		if n := itemsLen("/api/v1/me/collections", asUser); n != 0 {
+			t.Fatalf("primary profile sees %d collections, want 0", n)
+		}
+	})
+
+	t.Run("progress", func(t *testing.T) {
+		w := do(h, jsonReq("PATCH", "/api/v1/audiobooks/book1/progress", asUserKids, `{"current_seconds":30,"progress_pct":0.3}`))
+		if w.Code != http.StatusOK {
+			t.Fatalf("upsert progress = %d body=%s, want 200", w.Code, w.Body)
+		}
+		if n := itemsLen("/api/v1/me/progress", asUserKids); n != 1 {
+			t.Fatalf("kids profile sees %d progress rows, want 1 (its own write)", n)
+		}
+		if n := itemsLen("/api/v1/me/progress", asUser); n != 0 {
+			t.Fatalf("primary profile sees %d progress rows, want 0", n)
+		}
+	})
+
+	t.Run("bookmarks", func(t *testing.T) {
+		w := do(h, jsonReq("POST", "/api/v1/audiobooks/book1/bookmarks", asUserKids, `{"position_seconds":42}`))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create bookmark = %d body=%s, want 201", w.Code, w.Body)
+		}
+		if n := itemsLen("/api/v1/audiobooks/book1/bookmarks", asUserKids); n != 1 {
+			t.Fatalf("kids profile sees %d bookmarks, want 1 (its own write)", n)
+		}
+		if n := itemsLen("/api/v1/audiobooks/book1/bookmarks", asUser); n != 0 {
+			t.Fatalf("primary profile sees %d bookmarks, want 0", n)
+		}
+	})
+
+	t.Run("playback sessions", func(t *testing.T) {
+		w := do(h, req("POST", "/api/v1/audiobooks/book1/playback-session", asUserKids))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create playback session = %d body=%s, want 201", w.Code, w.Body)
+		}
+		if n := itemsLen("/api/v1/me/playback-sessions", asUserKids); n != 1 {
+			t.Fatalf("kids profile sees %d playback sessions, want 1 (its own write)", n)
+		}
+		if n := itemsLen("/api/v1/me/playback-sessions", asUser); n != 0 {
+			t.Fatalf("primary profile sees %d playback sessions, want 0", n)
+		}
+	})
 }
 
 func do(h http.Handler, r *http.Request) *httptest.ResponseRecorder {

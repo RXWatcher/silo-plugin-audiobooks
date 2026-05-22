@@ -619,6 +619,39 @@ func AbsServerSettings() map[string]any {
 	}
 }
 
+// absUserObject builds the ABS `user` envelope shared by /login,
+// /authorize and /me. mediaProgress is hydrated from the user's recent
+// progress rows so clients show resume positions without a second call.
+func (h *Handler) absUserObject(ctx context.Context, userID, displayName, defaultLibraryID string) map[string]any {
+	progress := make([]map[string]any, 0)
+	if h.store != nil {
+		rows, _ := h.store.ListRecentProgress(ctx, userID, 200)
+		for _, p := range rows {
+			progress = append(progress, progressToABS(userID, p))
+		}
+	}
+	name := displayName
+	if name == "" {
+		name = userID
+	}
+	return map[string]any{
+		"id":                  userID,
+		"username":            name,
+		"type":                "user",
+		"defaultLibraryId":    defaultLibraryID,
+		"librariesAccessible": []any{},
+		"mediaProgress":       progress,
+		"bookmarks":           []any{},
+		"isOldToken":          false,
+		"permissions": map[string]any{
+			"update":                true,
+			"delete":                true,
+			"download":              true,
+			"accessExplicitContent": true,
+		},
+	}
+}
+
 // completeLogin mints ABS access + refresh JWTs for the validated user and
 // writes the login response. Shared by both the header path and the
 // body-creds path so the response shape is identical.
@@ -692,23 +725,8 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID s
 	// from there, others from the top-level fields — emitting both
 	// covers every mainline reader).
 	returnTokens := strings.EqualFold(r.Header.Get("x-return-tokens"), "true")
-	user := map[string]any{
-		"id":                        userID,
-		"username":                  userID,
-		"type":                      "user", // "user" / "admin" / "root"; defaults to "user"
-		"defaultLibraryId":          defaultLibraryID,
-		"librariesAccessible":       []any{}, // empty = "all libraries"
-		"mediaProgress":             []any{},
-		"bookmarks":                 []any{},
-		"isOldToken":                false,
-		"token":                     access, // legacy field some 2.17- clients still read
-		"permissions": map[string]any{
-			"update":                true,
-			"delete":                true,
-			"download":              true,
-			"accessExplicitContent": true,
-		},
-	}
+	user := h.absUserObject(r.Context(), userID, "", defaultLibraryID)
+	user["token"] = access // legacy field some 2.17- clients still read
 	if returnTokens {
 		user["accessToken"] = access
 		user["refreshToken"] = refresh
@@ -748,22 +766,7 @@ func (h *Handler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		}
 		libraryMaps = append(libraryMaps, absLibraryMap(lib))
 	}
-	user := map[string]any{
-		"id":                  a.UserID,
-		"username":            a.UserID,
-		"type":                "user",
-		"defaultLibraryId":    defaultLibraryID,
-		"librariesAccessible": []any{},
-		"mediaProgress":       []any{},
-		"bookmarks":           []any{},
-		"isOldToken":          false,
-		"permissions": map[string]any{
-			"update":                true,
-			"delete":                true,
-			"download":              true,
-			"accessExplicitContent": true,
-		},
-	}
+	user := h.absUserObject(r.Context(), a.UserID, "", defaultLibraryID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":                 user,
 		"userDefaultLibraryId": defaultLibraryID,
@@ -900,11 +903,7 @@ func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 	a, _ := absAuthFrom(r)
 	lib, _ := h.defaultPortalLibrary(r.Context())
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id":               a.UserID,
-		"username":         a.UserID,
-		"defaultLibraryId": absLibraryID(lib),
-	})
+	writeJSON(w, http.StatusOK, h.absUserObject(r.Context(), a.UserID, "", absLibraryID(lib)))
 }
 
 func (h *Handler) handleLibraries(w http.ResponseWriter, r *http.Request) {

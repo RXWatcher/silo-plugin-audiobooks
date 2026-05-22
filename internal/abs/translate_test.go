@@ -121,3 +121,9 @@ func TestToLibraryItem_PrefersBackendRefs(t *testing.T) {
 		t.Errorf("series = %+v", got.Media.Metadata.Series)
 	}
 }
+
+func TestServerVersionIsCurrentRelease(t *testing.T) {
+	if abs.ServerVersion != "2.35.0" {
+		t.Fatalf("ServerVersion = %q, want 2.35.0", abs.ServerVersion)
+	}
+}

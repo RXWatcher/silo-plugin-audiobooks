@@ -25,3 +25,10 @@ func TestAbsUserObjectShape(t *testing.T) {
 		t.Errorf("username = %v, want u1 (falls back to id when displayName empty)", obj["username"])
 	}
 }
+
+func TestCtxAuthCarriesProfileID(t *testing.T) {
+	a := ctxAuth{UserID: "u1", ProfileID: "p1"}
+	if a.ProfileID != "p1" {
+		t.Fatalf("ctxAuth.ProfileID field missing or wrong")
+	}
+}

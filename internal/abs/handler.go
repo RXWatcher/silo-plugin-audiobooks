@@ -290,9 +290,10 @@ func (h *Handler) Mount(r chi.Router) {
 type ctxKey struct{}
 
 type ctxAuth struct {
-	UserID string
-	JTI    string
-	Token  string
+	UserID    string
+	ProfileID string
+	JTI       string
+	Token     string
 }
 
 func (h *Handler) bearerAuth(next http.Handler) http.Handler {
@@ -323,9 +324,10 @@ func (h *Handler) bearerAuth(next http.Handler) http.Handler {
 		}
 		_ = h.store.TouchABSToken(r.Context(), claims.JTI)
 		ctx := context.WithValue(r.Context(), ctxKey{}, ctxAuth{
-			UserID: claims.UserID,
-			JTI:    claims.JTI,
-			Token:  raw,
+			UserID:    claims.UserID,
+			ProfileID: claims.ProfileID,
+			JTI:       claims.JTI,
+			Token:     raw,
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

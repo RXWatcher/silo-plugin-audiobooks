@@ -1364,66 +1364,33 @@ func (h *Handler) handlePlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build session-scoped contentURL per track. The URL must resolve from
-	// whichever origin the ABS client is connected to — standalone listener
-	// or host plugin proxy — so we build an absolute URL based on the
-	// inbound request's origin rather than the env-supplied hostBase, which
-	// only describes the host's internal API URL.
+	// Build audio tracks. urlFor takes the 1-based wire index, mints a
+	// session-scoped JWT bound to that index, and returns the absolute
+	// /abs/public/session/.../track/{idx}?token=... URL the mobile
+	// client embeds. The mobile player actually IGNORES this URL and
+	// builds its own /public/session/.../track/{index||1} with a Bearer
+	// header — see handlePublicTrack — but real ABS clients (web,
+	// third-party readers) read the contentUrl, so we still emit a
+	// signed one.
 	baseURL := h.absBaseURL(r)
-	tracks := make([]AudioTrack, len(d.Files))
-	var cumulative float64
-	for i, f := range d.Files {
-		// ABS uses 1-based file indexing on the wire (real ABS server
-		// initializes the index at 1 in LibraryItemController.js:500).
-		// The mobile audio player does `track.index || 1` at
-		// AbsAudioPlayer.js:258, which silently maps our 0-based index
-		// to 1 and then fetches a file the backend doesn't have →
-		// 502 → spinner forever. Emit 1-based on the wire (URL +
-		// session-token claim + AudioTrack.Index) and convert back to
-		// 0-based at the backend boundary in handlePublicTrack.
-		wireIdx := f.Index + 1
-		// Duration fallback: if the file's own duration is missing or
-		// zero, the mobile player's currentTrack-finder
-		// (AbsAudioPlayer.js:24-28) does
-		//   findIndex(t => floor(t.startOffset) <= startTime &&
-		//                  floor(t.startOffset + t.duration) > startTime)
-		// which fails when t.duration is 0 (the second clause becomes
-		// startOffset > startTime, false for startTime=0). The player
-		// then sits at currentTrack=audioTracks[0] but never enters
-		// `canplay` because there's nothing to play — spinner forever.
-		// Booklore-ng has the same bug and fixes it by extracting
-		// duration from the file directly (booklore /api/abs/api/items/
-		// [id]/play/route.ts:118-139). We don't have file access, but
-		// for single-file audiobooks the book-level d.DurationSeconds
-		// is the same value, so fall back to that. For multi-file
-		// books with a zero file duration, we don't have a safe per-
-		// file fallback — log a warning so the catalog can be fixed.
-		trackDuration := float64(f.DurationSeconds)
-		if trackDuration <= 0 && len(d.Files) == 1 && d.DurationSeconds > 0 {
-			trackDuration = float64(d.DurationSeconds)
-		}
-		if trackDuration <= 0 {
+	urlFor := func(wireIdx int) string {
+		tok, _ := IssueSessionToken(cfg.ABSJWTSecret, a.UserID, sessionID, encodedBookID, wireIdx, 6*time.Hour)
+		return baseURL +
+			"/abs/public/session/" + sessionID + "/track/" + strconv.Itoa(wireIdx) +
+			"?token=" + tok
+	}
+	audioTracks := buildPlayAudioTracks(d, encodedBookID, urlFor)
+	for _, t := range audioTracks {
+		if dur, ok := t["duration"].(float64); !ok || dur <= 0 {
 			h.logger.Warn("abs /play: zero track duration",
 				"book_id", backendBookID,
-				"file_idx", f.Index,
+				"wire_idx", t["index"],
 				"file_count", len(d.Files),
 				"book_duration", d.DurationSeconds,
 			)
 		}
-		tok, _ := IssueSessionToken(cfg.ABSJWTSecret, a.UserID, sessionID, encodedBookID, wireIdx, 6*time.Hour)
-		trackURL := baseURL +
-			"/abs/public/session/" + sessionID + "/track/" + strconv.Itoa(wireIdx) +
-			"?token=" + tok
-		tracks[i] = AudioTrack{
-			Index:       wireIdx,
-			StartOffset: cumulative,
-			ContentURL:  trackURL,
-			MimeType:    f.MimeType,
-			Duration:    trackDuration,
-			Codec:       f.Format,
-		}
-		cumulative += trackDuration
 	}
+
 	h.publish(a.UserID, "user_session_open", map[string]any{
 		"id":            sessionID,
 		"libraryItemId": encodedBookID,
@@ -1432,50 +1399,116 @@ func (h *Handler) handlePlay(w http.ResponseWriter, r *http.Request) {
 	})
 	h.broadcastListenerCount(r.Context())
 
-	// Resume position: the audiobookshelf-app reads playbackSession.currentTime
-	// to seed the audio element's initial position. If absent the player
-	// stays in BUFFERING after load and the play button spins forever.
-	// Fall back to 0 when there's no prior progress (new listen).
+	// Resume position: the mobile player reads playbackSession.currentTime
+	// to seed the audio element's initial position. Without it the player
+	// stays in BUFFERING and the spinner runs forever.
 	var currentTime float64
 	if prog, err := h.store.GetProgress(r.Context(), a.UserID, a.ProfileID, encodedBookID); err == nil {
 		currentTime = float64(prog.CurrentSeconds)
 	}
-	totalDuration := cumulative
+
+	totalDuration := float64(0)
+	for _, t := range audioTracks {
+		if dur, ok := t["duration"].(float64); ok {
+			totalDuration += dur
+		}
+	}
 	if totalDuration <= 0 {
 		totalDuration = float64(d.DurationSeconds)
 	}
-	nowMs := time.Now().UnixMilli()
-	// Chapters: shape into the ABS ChapterABS struct so the mobile
-	// player can render the chapter list and chapter-skip works.
-	// Previously hardcoded to [] even when the backend supplied
-	// chapters via d.Chapters.
-	chapters := make([]ChapterABS, len(d.Chapters))
+
+	// Chapters: ABS shape is {id, start, end, title}, start/end in
+	// seconds. Mobile renders the chapter list AND uses these for
+	// in-chapter skip.
+	chapters := make([]map[string]any, len(d.Chapters))
 	for i, c := range d.Chapters {
-		chapters[i] = ChapterABS{
-			ID:    i,
-			Start: float64(c.StartSeconds),
-			End:   float64(c.EndSeconds),
-			Title: c.Title,
+		chapters[i] = map[string]any{
+			"id":    i,
+			"start": float64(c.StartSeconds),
+			"end":   float64(c.EndSeconds),
+			"title": c.Title,
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id":            sessionID,
-		"userId":        a.UserID,
-		"libraryItemId": encodedBookID,
-		"mediaType":     "book",
-		"playMethod":    0, // DIRECTPLAY — mobile player branches on this
-		"mediaPlayer":   p.MediaPlayer,
-		"deviceInfo":    p.DeviceInfo,
-		"serverVersion": ServerVersion,
-		"audioTracks":   tracks,
-		"chapters":      chapters,
-		"duration":      totalDuration,
-		"currentTime":   currentTime,
-		"startTime":     currentTime,
-		"timeListening": 0,
-		"startedAt":     nowMs,
-		"updatedAt":     nowMs,
-	})
+
+	mediaMetadata := buildPlayMediaMetadata(d)
+	libraryItem := buildPlayLibraryItem(d, lib, encodedBookID, mediaMetadata, audioTracks, chapters, totalDuration)
+
+	// Display fields the "Now Playing" widget reads off the top-level
+	// session. Missing them makes the widget render with empty author /
+	// title pills but the audio loader silently aborts if it reads
+	// displayAuthor for the cover-initial fallback and gets undefined.
+	displayTitle := d.Title
+	displayAuthor := ""
+	if md, ok := mediaMetadata["authorName"].(string); ok {
+		displayAuthor = md
+	}
+	coverPath := d.CoverPath
+	if coverPath == "" && d.CoverURL != "" {
+		coverPath = d.CoverURL
+	}
+
+	now := time.Now()
+	nowMs := now.UnixMilli()
+	dateStr := now.UTC().Format("2006-01-02")
+	dayOfWeek := now.UTC().Weekday().String()
+
+	// DeviceInfo is echoed back to the client with a stable shape. Real
+	// ABS clients pattern-match on these field names (deviceId,
+	// manufacturer, model, sdkVersion, clientVersion) so emit the keys
+	// even when the request didn't carry them.
+	deviceInfo := map[string]any{
+		"deviceId":      deviceID,
+		"manufacturer":  pickStr(p.DeviceInfo, "manufacturer", "Unknown"),
+		"model":         pickStr(p.DeviceInfo, "model", "Unknown"),
+		"sdkVersion":    pickAny(p.DeviceInfo, "sdkVersion", 0),
+		"clientVersion": pickStr(p.DeviceInfo, "clientVersion", "0.0.0"),
+	}
+
+	playbackSession := map[string]any{
+		"id":             sessionID,
+		"userId":         a.UserID,
+		"libraryId":      absLibraryID(lib),
+		"libraryItemId":  encodedBookID,
+		"bookId":         encodedBookID,
+		"episodeId":      nil,
+		"mediaType":      "book",
+		"mediaMetadata":  mediaMetadata,
+		"chapters":       chapters,
+		"displayTitle":   displayTitle,
+		"displayAuthor":  displayAuthor,
+		"coverPath":      nilIfEmpty(coverPath),
+		"duration":       totalDuration,
+		"playMethod":     0, // DIRECTPLAY
+		"mediaPlayer":    firstNonEmpty(p.MediaPlayer, "exo-player"),
+		"deviceInfo":     deviceInfo,
+		"serverVersion":  ServerVersion,
+		"date":           dateStr,
+		"dayOfWeek":      dayOfWeek,
+		"timeListening":  0,
+		"startTime":      currentTime,
+		"currentTime":    currentTime,
+		"startedAt":      nowMs,
+		"updatedAt":      nowMs,
+		"audioTracks":    audioTracks,
+		"libraryItem":    libraryItem,
+	}
+	writeJSON(w, http.StatusOK, playbackSession)
+}
+
+// pickStr returns the string value at key from m, or fallback when missing.
+func pickStr(m map[string]any, key, fallback string) string {
+	if v, ok := m[key].(string); ok && v != "" {
+		return v
+	}
+	return fallback
+}
+
+// pickAny returns the any value at key from m, or fallback when missing.
+func pickAny(m map[string]any, key string, fallback any) any {
+	if v, ok := m[key]; ok && v != nil {
+		return v
+	}
+	return fallback
 }
 
 type syncPayload struct {

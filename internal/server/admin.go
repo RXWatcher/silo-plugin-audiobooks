@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -30,6 +31,7 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Post("/admin/sessions/{id}/close", s.handleAdminCloseSession)
 	r.Get("/admin/tokens", s.handleAdminListTokens)
 	r.Post("/admin/tokens/{id}/revoke", s.handleAdminRevokeToken)
+	r.Get("/admin/audit/zero-durations", s.handleAdminAuditZeroDurations)
 }
 
 func (s *Server) handleGetBackendConfig(w http.ResponseWriter, r *http.Request) {
@@ -377,4 +379,143 @@ func (s *Server) handleAdminRevokeToken(w http.ResponseWriter, r *http.Request) 
 	// No token with this id: return 404 instead of a misleading 204 that
 	// would tell the admin a revoke succeeded when nothing was revoked.
 	writeError(w, http.StatusNotFound, "token not found")
+}
+
+// handleAdminAuditZeroDurations enumerates the backend catalog and reports
+// books whose file durations are zero. Mobile audiobookshelf-app's
+// currentTrack-finder needs a non-zero duration on the matching track or
+// playback stalls (see internal/abs/handler.go's handlePlay comment for
+// the underlying bug). The ABS handler falls back to the book-level
+// duration when there's a single audio file; multi-file books with any
+// zero-duration track stay broken and surface in `broken` below.
+//
+// Slow by nature: one HTTP round-trip per book to GetDetail. Bounded by
+// ?limit=N (default 1000, max 50000). Operator runs it once per catalog
+// after a re-scan to verify no remaining zero-duration books.
+func (s *Server) handleAdminAuditZeroDurations(w http.ResponseWriter, r *http.Request) {
+	id, ok := auth.RequireAdmin(w, r)
+	if !ok {
+		return
+	}
+	if s.d.Backend == nil {
+		writeError(w, http.StatusServiceUnavailable, "backend unavailable")
+		return
+	}
+	limit := 1000
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+			if limit > 50000 {
+				limit = 50000
+			}
+		}
+	}
+	libraryFilter := r.URL.Query().Get("library_id")
+
+	type bookReport struct {
+		BookID       string `json:"book_id"`
+		Title        string `json:"title"`
+		FileCount    int    `json:"file_count"`
+		ZeroFiles    []int  `json:"zero_file_indexes"`
+		BookDuration int    `json:"book_duration_seconds"`
+		LibraryID    int64  `json:"library_id"`
+		LibraryName  string `json:"library_name"`
+	}
+	broken := []bookReport{}
+	salvageable := []bookReport{}
+	scanned := 0
+	hitLimit := false
+
+	libs, err := s.d.Store.ListPortalLibraries(r.Context(), true)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+
+LibraryLoop:
+	for _, lib := range libs {
+		if libraryFilter != "" && strconv.FormatInt(lib.ID, 10) != libraryFilter {
+			continue
+		}
+		if lib.BackendPluginID == "" {
+			continue
+		}
+		cursor := ""
+		for {
+			page, err := s.d.Backend.ListCatalog(r.Context(), id.Token, lib.BackendPluginID,
+				backend.ListParams{
+					LibraryID: backendIDOf(lib),
+					Limit:     200,
+					Cursor:    cursor,
+				})
+			if err != nil {
+				slog.Warn("audiobooks audit: list catalog failed",
+					"library_id", lib.ID, "err", err)
+				break
+			}
+			for _, summary := range page.Items {
+				if scanned >= limit {
+					hitLimit = true
+					break LibraryLoop
+				}
+				scanned++
+				detail, err := s.d.Backend.GetDetail(r.Context(), id.Token, lib.BackendPluginID, summary.ID)
+				if err != nil {
+					continue
+				}
+				zero := []int{}
+				for _, f := range detail.Files {
+					if f.DurationSeconds <= 0 {
+						zero = append(zero, f.Index)
+					}
+				}
+				if len(zero) == 0 {
+					continue
+				}
+				rep := bookReport{
+					BookID:       detail.ID,
+					Title:        detail.Title,
+					FileCount:    len(detail.Files),
+					ZeroFiles:    zero,
+					BookDuration: detail.DurationSeconds,
+					LibraryID:    lib.ID,
+					LibraryName:  lib.Name,
+				}
+				// The /play duration fallback rescues single-file books
+				// whose book-level duration is populated; everything
+				// else stays broken on the mobile player.
+				if len(detail.Files) == 1 && detail.DurationSeconds > 0 {
+					salvageable = append(salvageable, rep)
+				} else {
+					broken = append(broken, rep)
+				}
+			}
+			if page.NextCursor == "" || scanned >= limit {
+				break
+			}
+			cursor = page.NextCursor
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"scanned":           scanned,
+		"limit":             limit,
+		"hit_limit":         hitLimit,
+		"broken_count":      len(broken),
+		"salvageable_count": len(salvageable),
+		"broken":            broken,
+		"salvageable":       salvageable,
+	})
+}
+
+// backendIDOf returns the backend library id for a portal_library row.
+// Mirrors the backendLibraryID helper in internal/abs but kept local to
+// avoid the abs package dependency. BackendLibraryID is *int64 because
+// some libraries don't map cleanly back to a backend id; fall back to
+// the portal id which still uniquely identifies a row.
+func backendIDOf(lib store.PortalLibrary) int64 {
+	if lib.BackendLibraryID != nil && *lib.BackendLibraryID != 0 {
+		return *lib.BackendLibraryID
+	}
+	return lib.ID
 }

@@ -1335,7 +1335,7 @@ func (h *Handler) handlePlay(w http.ResponseWriter, r *http.Request) {
 		indexes = append(indexes, f.Index)
 		fileDurations = append(fileDurations, f.DurationSeconds)
 	}
-	h.logger.Info("abs /play",
+	h.logger.Debug("abs /play",
 		"book_id", backendBookID,
 		"encoded_id", encodedBookID,
 		"file_count", len(d.Files),
@@ -1764,7 +1764,7 @@ func (h *Handler) streamStitched(
 	defer resp.Body.Close()
 
 	clientRange := r.Header.Get("Range")
-	h.logger.Info("abs stream proxy: upstream response",
+	h.logger.Debug("abs stream proxy: upstream response",
 		"book_id", backendBookID,
 		"wire_idx", wireIdx,
 		"backend_idx", backendIdx,

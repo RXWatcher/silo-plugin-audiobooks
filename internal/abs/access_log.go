@@ -6,14 +6,11 @@ import (
 	"time"
 )
 
-// accessLog is a minimal chi middleware that emits one Info line per
-// request. Intentional during this playback-debugging window so the
-// mobile client's actual traffic is visible in plugin logs without
-// reaching for a packet capture. Path-only — query string is dropped
-// to avoid surfacing ?token= or refresh tokens. Auth presence is
-// reported as a boolean for the same reason.
-//
-// Demote to Debug or remove once playback issues are resolved.
+// accessLog is a minimal chi middleware that emits one structured line
+// per request. The 2xx/3xx path logs at Debug so an Info-default plugin
+// runtime stays quiet during normal playback; non-2xx escalates to Warn
+// so failures still surface without an explicit log-level flip. Path is
+// captured query-less so ?token= and refresh tokens never land in logs.
 func (h *Handler) accessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -30,22 +27,11 @@ func (h *Handler) accessLog(next http.Handler) http.Handler {
 			authKind = "qtok"
 		}
 		// Short-circuit assets the mobile app never hits to keep the
-		// signal-to-noise high while debugging.
+		// signal-to-noise high.
 		path := r.URL.Path
 		if strings.HasPrefix(path, "/assets/") {
 			return
 		}
-		h.logger.Info("abs req",
-			"method", r.Method,
-			"path", path,
-			"auth", authKind,
-			"status", sw.status,
-			"bytes", sw.bytes,
-			"dur_ms", time.Since(start).Milliseconds(),
-		)
-		// Anything non-success additionally surfaces at Info so the
-		// debugging window's relevant traffic isn't buried under a
-		// firehose of healthy /me / /libraries calls.
 		if sw.status >= 400 {
 			h.logger.Warn("abs req failed",
 				"method", r.Method,
@@ -54,7 +40,16 @@ func (h *Handler) accessLog(next http.Handler) http.Handler {
 				"status", sw.status,
 				"dur_ms", time.Since(start).Milliseconds(),
 			)
+			return
 		}
+		h.logger.Debug("abs req",
+			"method", r.Method,
+			"path", path,
+			"auth", authKind,
+			"status", sw.status,
+			"bytes", sw.bytes,
+			"dur_ms", time.Since(start).Milliseconds(),
+		)
 	})
 }
 

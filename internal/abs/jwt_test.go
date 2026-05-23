@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/abs"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/abs"
 )
 
 func TestIssueAndParseAccess(t *testing.T) {

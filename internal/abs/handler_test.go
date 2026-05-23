@@ -13,11 +13,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/abs"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/migrate"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/testutil"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/abs"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/migrate"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/testutil"
 )
 
 // jwtSecret is the per-test signing secret for ABS access tokens. Must be at
@@ -88,7 +88,7 @@ func (f *authFixture) do(method, path string, headers map[string]string, body st
 // login returns an access token after a successful header-authenticated login.
 func (f *authFixture) login(userID string) string {
 	f.t.Helper()
-	status, body := f.do("POST", "/abs/api/login", map[string]string{"X-Continuum-User-Id": userID}, "")
+	status, body := f.do("POST", "/abs/api/login", map[string]string{"X-Silo-User-Id": userID}, "")
 	if status != 200 {
 		f.t.Fatalf("login: status=%d body=%s", status, body)
 	}
@@ -102,7 +102,7 @@ func (f *authFixture) login(userID string) string {
 }
 
 // TestHandleLogin_RejectsMissingIdentity verifies the auth-bypass fix:
-// POSTing /login without the host-injected X-Continuum-User-Id header must
+// POSTing /login without the host-injected X-Silo-User-Id header must
 // 401 when standalone login is disabled (the default backend_config mode).
 // This is the security guarantee — any change that allows body-supplied
 // identity through the disabled gate reopens the bypass and must fail this
@@ -125,7 +125,7 @@ func TestHandleLogin_RejectsMissingIdentity(t *testing.T) {
 func TestHandleLogin_AcceptsHeaderIdentity(t *testing.T) {
 	f := newAuthFixture(t)
 	status, body := f.do("POST", "/abs/api/login",
-		map[string]string{"X-Continuum-User-Id": "u-alice"}, "")
+		map[string]string{"X-Silo-User-Id": "u-alice"}, "")
 	if status != 200 {
 		t.Fatalf("status=%d body=%s", status, body)
 	}
@@ -296,8 +296,8 @@ func TestHandleLogout_RevokesToken(t *testing.T) {
 func (f *authFixture) loginWithProfile(userID, profileID string) string {
 	f.t.Helper()
 	status, body := f.do("POST", "/abs/api/login", map[string]string{
-		"X-Continuum-User-Id":    userID,
-		"X-Continuum-Profile-Id": profileID,
+		"X-Silo-User-Id":    userID,
+		"X-Silo-Profile-Id": profileID,
 	}, "")
 	if status != 200 {
 		f.t.Fatalf("login: status=%d body=%s", status, body)
@@ -407,7 +407,7 @@ func TestLoginResponse_PopulatesLibrariesAccessibleAndBookmarks(t *testing.T) {
 		t.Fatalf("seed bookmark: %v", err)
 	}
 	status, body := f.do("POST", "/abs/api/login",
-		map[string]string{"X-Continuum-User-Id": "u-libs"}, "")
+		map[string]string{"X-Silo-User-Id": "u-libs"}, "")
 	if status != 200 {
 		t.Fatalf("login status=%d body=%s", status, body)
 	}

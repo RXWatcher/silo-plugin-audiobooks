@@ -1,6 +1,6 @@
 import { authedFetch } from '@/api/client';
 
-const DB_NAME = 'continuum-audiobook-offline';
+const DB_NAME = 'silo-audiobook-offline';
 const STORE = 'files';
 
 function openDB(): Promise<IDBDatabase> {

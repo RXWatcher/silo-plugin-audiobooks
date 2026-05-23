@@ -15,8 +15,8 @@
 ## Prerequisite (Phase 2 only)
 
 Phase 2 consumes the approved core design
-`/opt/continuum/docs/superpowers/specs/2026-05-13-profile-aware-third-party-auth-design.md`:
-the `RuntimeHost.ValidateProfileCredential` RPC and the `X-Continuum-Profile-Id`
+`/opt/silo/docs/superpowers/specs/2026-05-13-profile-aware-third-party-auth-design.md`:
+the `RuntimeHost.ValidateProfileCredential` RPC and the `X-Silo-Profile-Id`
 proxy header. These are built and deployed on core branch `feat/plugin-patches`,
 including the primary-profile normalization (core commit `12ef0e4a`) so that
 `profile_id = ""` canonically means the primary profile on both the RPC and the
@@ -40,12 +40,12 @@ Ships as plugin v1.1.0. Independent of profiles.
 - `internal/abs/translate.go`: `ServerVersion` `2.26.0` → `2.35.0` (current
   Audiobookshelf release). Surfaced by `/status`, `/ping`, and the
   `serverSettings` block of login responses.
-- `cmd/continuum-plugin-audiobooks/manifest.json`: plugin version
+- `cmd/silo-plugin-audiobooks/manifest.json`: plugin version
   `1.0.3` → `1.1.0`.
 
 ### 1.2 Handshake and identity responses
 
-- `/status` (`handleStatus`): `app` field `"continuum"` → `"audiobookshelf"`.
+- `/status` (`handleStatus`): `app` field `"silo"` → `"audiobookshelf"`.
   Strict clients (ShelfPlayer, Lissen, the ABS web client) reject any other
   value; the official mobile app currently tolerates it but the check is a
   documented TODO upstream. Add `authMethods: ["local"]`.
@@ -85,8 +85,8 @@ Ships as plugin v1.2.0. Depends on the Phase-2 prerequisite above.
 
 `handleLogin` keeps two paths:
 
-- **Path A — host-proxied.** Read `X-Continuum-Profile-Id` (empty = primary)
-  alongside `X-Continuum-User-Id`; mint the ABS JWT carrying both.
+- **Path A — host-proxied.** Read `X-Silo-Profile-Id` (empty = primary)
+  alongside `X-Silo-User-Id`; mint the ABS JWT carrying both.
 - **Path B — standalone port.** `handleStandaloneLogin` stops calling the
   `hostlogin` HTTP client and instead calls
   `RuntimeHost.ValidateProfileCredential` with the raw `{username, password}`
@@ -127,7 +127,7 @@ rows backfill to `''` (primary). Every scoping query gains
 The plugin builds no profile-management UI and no switcher — the core app owns
 profile creation and selection. The audiobooks SPA becomes profile-aware: it
 sends `X-Profile-Id` (the active profile chosen in the core app) on its API
-calls; the host proxy stamps `X-Continuum-Profile-Id`; the plugin scopes every
+calls; the host proxy stamps `X-Silo-Profile-Id`; the plugin scopes every
 response to that profile. Switching profile in the core app re-scopes the
 audiobooks UI — "in as Jim, switched to Laura" yields Laura's collections and
 progress.
@@ -138,7 +138,7 @@ progress.
 and Phase 2 removes `hostlogin`, so the ABS `username` field
 (`/login`, `/authorize`, `/me`) is sourced per path:
 
-- **Path A:** the `X-Continuum-User-Name` / `X-Continuum-Profile-Name` headers
+- **Path A:** the `X-Silo-User-Name` / `X-Silo-Profile-Name` headers
   the host already stamps.
 - **Path B:** the profile portion of the username string the client typed at
   login, captured onto the `abs_tokens` row at mint time so later token-only
@@ -171,7 +171,7 @@ sees no behavioural change.
 | `internal/store/backend_config.go` | 2 | `standalone_login_mode` → enabled/disabled |
 | `internal/store/*` (user-owned tables) | 2 | `profile_id` column + query scoping |
 | `internal/migrate/` | 2 | `profile_id` migration + `standalone_login_mode` collapse |
-| `cmd/continuum-plugin-audiobooks/main.go` | 2 | wire the `runtimehost` client |
+| `cmd/silo-plugin-audiobooks/main.go` | 2 | wire the `runtimehost` client |
 | `web/src/*` | 2 | send `X-Profile-Id`, profile-aware scoping |
 
 ## Test strategy

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
 )
 
 // TestBuildEmbeddingText_LeadsWithSemanticContent pins the

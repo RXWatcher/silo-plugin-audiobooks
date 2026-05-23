@@ -10,15 +10,15 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
+	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/libsync"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/podcastfeed"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/libsync"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/podcastfeed"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
-// taskID extracts the capability id from a scheduled-task key. The Continuum
+// taskID extracts the capability id from a scheduled-task key. The Silo
 // host sends "plugin:<installationID>:<capabilityID>" (task_registry
 // pluginTaskKey); bare ids may arrive from host integration tests. This
 // plugin's task ids contain no ':'.

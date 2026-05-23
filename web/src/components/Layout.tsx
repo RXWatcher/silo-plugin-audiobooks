@@ -32,8 +32,8 @@ export default function Layout() {
 function LayoutInner() {
   const loc = useLocation();
   const isAdminRoute = loc.pathname.startsWith('/admin');
-  const backToContinuumHref = isAdminRoute ? '/admin/plugins' : '/';
-  const backToContinuumTitle = isAdminRoute ? 'Back to Continuum plugins' : 'Back to Continuum';
+  const backToSiloHref = isAdminRoute ? '/admin/plugins' : '/';
+  const backToSiloTitle = isAdminRoute ? 'Back to Silo plugins' : 'Back to Silo';
 
   return (
     <div className="bg-background relative min-h-[100dvh] overflow-x-hidden">
@@ -43,12 +43,12 @@ function LayoutInner() {
       <header className="glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 sm:mx-6 lg:mx-8">
         <div className="flex items-center gap-3">
           <a
-            href={backToContinuumHref}
+            href={backToSiloHref}
             className="text-muted-foreground hover:bg-surface-hover hover:text-foreground inline-flex min-h-9 min-w-9 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors"
-            title={backToContinuumTitle}
+            title={backToSiloTitle}
           >
             <ArrowLeft className="size-4" />
-            <span className="hidden sm:inline">Continuum</span>
+            <span className="hidden sm:inline">Silo</span>
           </a>
           <span className="text-border/60" aria-hidden>
             /
@@ -72,7 +72,7 @@ function LayoutInner() {
           <NavItem to="/apps" icon={<Smartphone className="size-4" />} label="Apps" />
           {/*
             No "Admin" tab here. The user portal is strictly user-facing;
-            admins reach the plugin's admin UI via the continuum host
+            admins reach the plugin's admin UI via the silo host
             sidebar (Apps → Books → Audiobooks → [admin]). Mixing the two
             surfaces in this nav blurred the audience.
           */}

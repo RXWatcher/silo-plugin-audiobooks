@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/bookref"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/bookref"
 )
 
 // handleSimilarItems — GET /api/items/{id}/similar?limit=N

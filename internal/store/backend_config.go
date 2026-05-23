@@ -216,7 +216,7 @@ func defaultBackendConfigShape() BackendConfig {
 		ABSAccessTTLHours: 24,
 		ABSRefreshTTLDays: 30,
 		// Bind 0.0.0.0, not 127.0.0.1. The plugin runs as a subprocess inside
-		// the continuum container, which publishes 9998-9999. Docker forwards
+		// the silo container, which publishes 9998-9999. Docker forwards
 		// the published port to the container's eth0 interface via DNAT — a
 		// listener on 127.0.0.1 is reachable only from inside the container,
 		// so a loopback bind makes the published port dead and ABS clients

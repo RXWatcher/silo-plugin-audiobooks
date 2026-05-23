@@ -61,7 +61,7 @@ export function authHeaders(): Record<string, string> {
 
 let refreshPromise: Promise<string | null> | null = null;
 
-// refreshAccessToken posts to the Continuum host's `/api/v1/auth/refresh`
+// refreshAccessToken posts to the Silo host's `/api/v1/auth/refresh`
 // (NOT a plugin-mounted route — the host owns session lifetime). It's
 // intentionally hardcoded without `mountPath()` because the SPA is served
 // from the host origin and refresh lives at host root.

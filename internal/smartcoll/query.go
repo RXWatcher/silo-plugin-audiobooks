@@ -1,6 +1,6 @@
 // Package smartcoll implements the rule-based Smart Collection DSL for the
 // audiobooks plugin. The shape mirrors the host's QueryDefinition (in
-// /opt/continuum_plugins/continuum/internal/catalog/query_definition.go)
+// /opt/silo_plugins/silo/internal/catalog/query_definition.go)
 // so the vocabulary is consistent across the federated catalog and the
 // per-plugin surfaces. Where the host's field/sort catalog is
 // video-domain, ours is audiobook-domain (title, author, narrator,

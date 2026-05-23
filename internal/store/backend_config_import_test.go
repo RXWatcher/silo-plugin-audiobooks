@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 func TestImportLegacyBackendConfigSeedsOnlyDefaultFields(t *testing.T) {

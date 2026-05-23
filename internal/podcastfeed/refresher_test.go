@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/podcastfeed"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/podcastfeed"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // fakeStore implements podcastfeed.Store for unit tests. It records every

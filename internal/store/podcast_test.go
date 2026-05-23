@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // TestPodcast_RoundTrip exercises the basic CRUD path against a real

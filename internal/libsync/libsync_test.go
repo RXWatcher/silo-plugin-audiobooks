@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 func i64(v int64) *int64 { return &v }

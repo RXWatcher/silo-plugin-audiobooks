@@ -11,7 +11,7 @@ import {
 
 const localBackend: InstalledBackend = {
   id: 11,
-  plugin_id: 'continuum.local-audiobooks',
+  plugin_id: 'silo.local-audiobooks',
   display_name: 'Local Audiobooks',
   enabled: true,
   capabilities: [],
@@ -26,7 +26,7 @@ const localBackend: InstalledBackend = {
 
 const requestProvider: InstalledBackend = {
   id: 29,
-  plugin_id: 'continuum.audiobook-requests',
+  plugin_id: 'silo.audiobook-requests',
   display_name: 'Audiobook Requests',
   enabled: true,
   capabilities: [],
@@ -52,7 +52,7 @@ describe('libraryHelpers', () => {
 
   it('resolves saved backend values by installation id or legacy plugin id', () => {
     expect(resolveInstalledBackend([localBackend], '11')).toEqual(localBackend);
-    expect(resolveInstalledBackend([localBackend], 'continuum.local-audiobooks')).toEqual(
+    expect(resolveInstalledBackend([localBackend], 'silo.local-audiobooks')).toEqual(
       localBackend,
     );
   });
@@ -63,7 +63,7 @@ describe('libraryHelpers', () => {
         id: 1,
         name: 'Main',
         media_type: 'audiobook',
-        backend_plugin_id: 'continuum.local-audiobooks',
+        backend_plugin_id: 'silo.local-audiobooks',
         backend_library_id: 777,
         enabled: true,
         sort_order: 99,

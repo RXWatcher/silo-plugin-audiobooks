@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // TestEncodeDecodePodcastEpisodeID covers the dispatch sentinel — the

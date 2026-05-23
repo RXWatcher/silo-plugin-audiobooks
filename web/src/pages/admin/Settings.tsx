@@ -30,7 +30,7 @@ const STANDALONE_LOGIN_MODE_LABELS: Record<StandaloneLoginMode, string> = {
 
 const STANDALONE_LOGIN_MODE_DESCRIPTION =
   'Controls whether the standalone listener accepts username + password from Audiobookshelf clients. ' +
-  'Listeners without a local password on the Continuum host always fail closed regardless of mode.';
+  'Listeners without a local password on the Silo host always fail closed regardless of mode.';
 
 const MODES = ['proxy', 'cache', 'direct'] as const;
 const MEDIA_TYPES = ['audiobook', 'podcast', 'audio drama', 'lecture'] as const;
@@ -121,7 +121,7 @@ export default function AdminSettings() {
               value={form.target_request_provider_plugin_id || form.target_backend_plugin_id}
               providers={requestProviders.length ? requestProviders : providers.data ?? []}
               onChange={(value) => update('target_request_provider_plugin_id', value)}
-              placeholder="continuum.audiobook-requests"
+              placeholder="silo.audiobook-requests"
             />
           </Field>
           <Field label="Auto-approve requests">
@@ -157,7 +157,7 @@ export default function AdminSettings() {
                 <Input
                   value={form.cache_dir}
                   onChange={(e) => update('cache_dir', e.target.value)}
-                  placeholder="/var/lib/continuum/audiobooks-cache"
+                  placeholder="/var/lib/silo/audiobooks-cache"
                 />
               </Field>
               <Field label="Max size (GB)">
@@ -332,7 +332,7 @@ function LibrarySection({
                     value={library.backend_plugin_id || ''}
                     providers={providers}
                     onChange={(value) => updateLibrary(index, { backend_plugin_id: value })}
-                    placeholder="continuum.local-audiobooks"
+                    placeholder="silo.local-audiobooks"
                   />
                 </FieldStack>
                 <div className="flex items-end gap-3">

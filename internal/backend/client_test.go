@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
 )
 
 func TestHostClient_BuildsURLAndAddsBearer(t *testing.T) {

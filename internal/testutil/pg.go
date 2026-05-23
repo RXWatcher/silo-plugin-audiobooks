@@ -27,7 +27,7 @@ func StartPG(t *testing.T) string {
 	ctx := context.Background()
 
 	c, err := tcpostgres.Run(ctx, "pgvector/pgvector:pg17",
-		tcpostgres.WithDatabase("continuum"),
+		tcpostgres.WithDatabase("silo"),
 		tcpostgres.WithUsername("plugin_audiobooks"),
 		tcpostgres.WithPassword("test"),
 		testcontainers.WithWaitStrategy(

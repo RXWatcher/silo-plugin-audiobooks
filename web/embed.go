@@ -33,7 +33,7 @@ func FS() http.FileSystem { return http.FS(FSEmbed()) }
 // Static-file content types are set explicitly because plugins run in a
 // minimal container with no /etc/mime.types — Go's mime database falls back
 // to text/plain for anything outside the small builtin table (notably
-// .webmanifest), and downstream the continuum proxy adds
+// .webmanifest), and downstream the silo proxy adds
 // X-Content-Type-Options: nosniff, so a wrong type makes the browser refuse
 // to register the service worker.
 var pwaContentTypes = map[string]string{
@@ -83,10 +83,10 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	theme := r.URL.Query().Get("theme")
 	if theme == "" {
-		theme = r.Header.Get("X-Continuum-Theme")
+		theme = r.Header.Get("X-Silo-Theme")
 	}
 	if theme == "" {
-		theme = r.Header.Get("X-Continuum-User-Theme")
+		theme = r.Header.Get("X-Silo-User-Theme")
 	}
 	if theme != "" {
 		safe := html.EscapeString(theme)

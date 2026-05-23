@@ -11,11 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/abs"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/migrate"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/testutil"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/abs"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/migrate"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/testutil"
 )
 
 // bookmarkFixture mounts the ABS handler against a real Postgres so
@@ -159,7 +159,7 @@ func (f *bookmarkFixture) callJSON(method, path, tok, body string) []map[string]
 func (f *bookmarkFixture) login(userID string) string {
 	f.t.Helper()
 	req := httptest.NewRequest("POST", "/abs/api/login", nil)
-	req.Header.Set("X-Continuum-User-Id", userID)
+	req.Header.Set("X-Silo-User-Id", userID)
 	w := httptest.NewRecorder()
 	f.router.ServeHTTP(w, req)
 	if w.Result().StatusCode != 200 {

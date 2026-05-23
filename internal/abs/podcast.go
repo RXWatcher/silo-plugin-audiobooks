@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // PodcastItem is the ABS-shaped representation of a podcast (mediaType=

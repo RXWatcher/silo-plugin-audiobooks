@@ -1,6 +1,6 @@
 # Audiobooks Portal: Setup, Routes, Flows, And Debugging
 
-Plugin ID: `continuum.audiobooks`. Customer-facing portal + ABS-compatible
+Plugin ID: `silo.audiobooks`. Customer-facing portal + ABS-compatible
 API + admin app. The README is the authoritative capability and config
 reference; this document focuses on operating and debugging a deployed
 plugin.
@@ -20,13 +20,13 @@ See also:
    creates all of its own tables inside that schema via embedded
    migrations at startup. The DSN passed in `database_url` MUST include
    `search_path=audiobooks` (e.g.
-   `postgres://plugin_audiobooks:...@host:5432/continuum?search_path=audiobooks&sslmode=disable`).
-2. Install the plugin in Continuum and set `database_url` in the host
+   `postgres://plugin_audiobooks:...@host:5432/silo?search_path=audiobooks&sslmode=disable`).
+2. Install the plugin in Silo and set `database_url` in the host
    plugin config. This is the only host-level config the plugin reads —
    everything else lives in the plugin's own `backend_config` row.
-3. Install at least one audiobook backend (`continuum-plugin-local-audiobooks`
-   or `continuum-plugin-bookwarehouse-audio`). Optionally install
-   `continuum-plugin-audiobook-requests`.
+3. Install at least one audiobook backend (`silo-plugin-local-audiobooks`
+   or `silo-plugin-bookwarehouse-audio`). Optionally install
+   `silo-plugin-audiobook-requests`.
 4. In the Audiobooks admin UI:
    - Pick the active backend (Settings).
    - Map presentation libraries to the backend's libraries/sub-libraries.
@@ -40,11 +40,11 @@ See also:
      after changing this value — see "Standalone listener" below.
    - Choose `standalone_login_mode` (`disabled` / `opt_in` / `all_accounts`).
 5. Optional environment variables (read once at process start):
-   - `CONTINUUM_HOST_URL` / `CONTINUUM_HOST_BASE_URL` — host base used to
+   - `SILO_HOST_URL` / `SILO_HOST_BASE_URL` — host base used to
      build self-referential stream URLs and the body-creds login target.
-   - `CONTINUUM_PLUGIN_TOKEN` — service token for plugin-to-plugin reads
+   - `SILO_PLUGIN_TOKEN` — service token for plugin-to-plugin reads
      (the scheduler uses this when reconciling requests).
-   - `CONTINUUM_REDIS_URL` — enables the Socket.io Redis adapter when
+   - `SILO_REDIS_URL` — enables the Socket.io Redis adapter when
      running multiple replicas. Unparseable or unreachable Redis logs a
      warning and falls back to the in-memory adapter (single-replica
      mode); it does not fail the boot.
@@ -56,7 +56,7 @@ See also:
 ## Route inventory
 
 All routes mount under the plugin's base path when invoked via the host
-proxy (`/plugins/continuum.audiobooks/...`). The standalone listener
+proxy (`/plugins/silo.audiobooks/...`). The standalone listener
 mounts the same set on `/` plus `/socket.io/*`.
 
 | Method | Path | Access | Purpose |
@@ -73,7 +73,7 @@ mounts the same set on `/` plus `/socket.io/*`.
 | `GET` | `/admin`, `/admin/*` | admin | Admin SPA. |
 | `*` | `/socket.io/*` | — | Realtime hub for ABS clients. **Standalone listener only.** Returns 503 when invoked via the host proxy because gRPC cannot bridge websocket upgrades. |
 
-The standalone listener strips every inbound `X-Continuum-*` header
+The standalone listener strips every inbound `X-Silo-*` header
 before invoking the handler (`internal/httproutes/server.go`). This is
 the trust boundary: header-derived identity is only valid on the
 host-proxied path; on the standalone listener identity is established by
@@ -101,7 +101,7 @@ bodies at 10 MiB, which silently broke any real audiobook file.
 ### Browse / playback (SPA, host-proxied)
 
 1. Customer opens the audiobooks SPA. The host's plugin proxy injects
-   `X-Continuum-User-Id` after session validation.
+   `X-Silo-User-Id` after session validation.
 2. SPA calls `/api/v1/...` for shelves; the portal reads
    `portal_libraries` and calls the configured backend for catalog
    details via the host runtime's `CallPluginHTTP` RPC.
@@ -130,9 +130,9 @@ bodies at 10 MiB, which silently broke any real audiobook file.
      closed because the host's `LocalProvider.Authenticate` gates on
      `user.LocalPasswordLoginEnabled`.
    - Body-creds path POSTs `{username, password, provider: "local"}` to
-     `{CONTINUUM_HOST_URL}/api/v1/auth/login` and reads `{user.id, user.name}`
+     `{SILO_HOST_URL}/api/v1/auth/login` and reads `{user.id, user.name}`
      from a 200. Host 401/403 → 401; any other host failure → 502 (a
-     misconfigured `CONTINUUM_HOST_URL` cannot silently succeed).
+     misconfigured `SILO_HOST_URL` cannot silently succeed).
 3. Successful login mints an access + refresh JWT pair (rows in
    `abs_tokens`) and returns the ABS envelope including
    `ServerVersion: 2.26`.
@@ -156,7 +156,7 @@ Statuses: `submitted` → `acknowledged` → `queued` → `downloading` →
    `submitted`, plugin emits a `request_submitted` event targeted at the
    configured request provider.
 2. Provider acknowledges → portal receives
-   `plugin.continuum.audiobook-requests.request_acknowledged`,
+   `plugin.silo.audiobook-requests.request_acknowledged`,
    `status_watcher` updates the row's `external_id` + status.
 3. Status changes flow through `request_status_changed`. Terminal
    `imported` events arrive either from the request provider
@@ -177,7 +177,7 @@ Statuses: `submitted` → `acknowledged` → `queued` → `downloading` →
   /abs/api/session/{sid}`, `POST /abs/api/items/{id}/play`, `POST
   /abs/api/session/{sid}/close`, plus consumer-side
   `audiobook_imported`.
-- Distribution: in-process hub by default; with `CONTINUUM_REDIS_URL`
+- Distribution: in-process hub by default; with `SILO_REDIS_URL`
   set, the `zishang520/socket.io-go-redis` adapter fans events across
   replicas. The host runs a single replica today, so Redis is optional.
 - A nil/unwired hub is tolerated everywhere — the publish path no-ops.
@@ -231,7 +231,7 @@ top-down: a broken backend will look like a broken portal.
   causes: wrong password, OIDC-only user without a local password, or
   the host's local auth provider is disabled. Check the host's
   `LocalProvider.Authenticate` log line.
-- 502: `CONTINUUM_HOST_URL` is wrong or unreachable. Plugin host
+- 502: `SILO_HOST_URL` is wrong or unreachable. Plugin host
   network must be able to resolve and reach the host's `/api/v1/auth/login`.
 - 429-ish behaviour: the per-IP token bucket on body-creds login fired
   (30 req/s, burst 60, failed attempts only). Verify the client isn't
@@ -253,8 +253,8 @@ top-down: a broken backend will look like a broken portal.
   - `server not ready` — plugin hasn't finished its Configure pass yet
     (storePtr nil). Wait or check startup logs for a migration failure.
 - Connections that auth succeed but never receive events → multi-replica
-  deployment without `CONTINUUM_REDIS_URL`. Publishing on replica A
-  cannot reach a client connected to replica B. Set `CONTINUUM_REDIS_URL`
+  deployment without `SILO_REDIS_URL`. Publishing on replica A
+  cannot reach a client connected to replica B. Set `SILO_REDIS_URL`
   and restart all replicas.
 
 ### 5. Postgres migration failure on startup
@@ -317,7 +317,7 @@ top-down: a broken backend will look like a broken portal.
 ## Verification after changes
 
 1. `make test` locally (Go + Vitest). Both pass before publishing.
-2. Reload the installation in Continuum admin.
+2. Reload the installation in Silo admin.
 3. Hit `/abs/api/ping` (public) — should return 200 with the ABS ping
    envelope.
 4. Open the SPA, exercise a browse + a 10-second playback, confirm the

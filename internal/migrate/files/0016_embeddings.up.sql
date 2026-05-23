@@ -1,5 +1,5 @@
 -- Embedding-based recommendations for audiobooks. Mirrors the host's
--- recommendations schema (continuum/migrations/001_schema.up.sql +
+-- recommendations schema (silo/migrations/001_schema.up.sql +
 -- 014_recommendations_embedding_lock_in.up.sql) so the engine can be
 -- adapted with minimal divergence.
 --

@@ -1,6 +1,6 @@
 // Package recommend implements embedding-based "similar books"
 // recommendations for the audiobooks plugin. Adapted from the host's
-// /opt/continuum_plugins/continuum/internal/recommendations package
+// /opt/silo_plugins/silo/internal/recommendations package
 // with the same OpenAI/Gemini/Ollama client surface and similar
 // pipeline shape, scoped to audiobook items.
 //

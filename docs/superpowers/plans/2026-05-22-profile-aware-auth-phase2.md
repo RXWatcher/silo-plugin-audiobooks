@@ -4,13 +4,13 @@
 
 **Goal:** Make the audiobooks plugin profile-aware — a third-party ABS client logs in as `user#profile`, the web portal scopes to the active profile, and every per-listener table is keyed by profile.
 
-**Architecture:** Login resolves a `(userID, profileID)` pair — Path A from the `X-Continuum-Profile-Id` header, Path B from the core `RuntimeHost.ValidateProfileCredential` RPC. `profileID` rides in the ABS JWT, is resolved by `bearerAuth` into `ctxAuth`, and is threaded into every user-owned store query. Empty `profileID` (`""`) is the canonical primary profile. Spec: `docs/superpowers/specs/2026-05-22-abs-compat-and-profile-login-design.md` (Phase 2).
+**Architecture:** Login resolves a `(userID, profileID)` pair — Path A from the `X-Silo-Profile-Id` header, Path B from the core `RuntimeHost.ValidateProfileCredential` RPC. `profileID` rides in the ABS JWT, is resolved by `bearerAuth` into `ctxAuth`, and is threaded into every user-owned store query. Empty `profileID` (`""`) is the canonical primary profile. Spec: `docs/superpowers/specs/2026-05-22-abs-compat-and-profile-login-design.md` (Phase 2).
 
-**Prerequisite — MUST be merged/deployed before this plan runs:** the core spec `2026-05-13-profile-aware-third-party-auth-design.md` — the `ValidateProfileCredential` RPC, the SDK helper `runtimehost.Client.ValidateProfileCredential`, the `X-Continuum-Profile-Id` proxy header, and the primary-profile normalization (core commit `12ef0e4a`). Verify with: `grep -r ValidateProfileCredential /opt/continuum_plugins/continuum-plugin-sdk/pkg` returns the helper.
+**Prerequisite — MUST be merged/deployed before this plan runs:** the core spec `2026-05-13-profile-aware-third-party-auth-design.md` — the `ValidateProfileCredential` RPC, the SDK helper `runtimehost.Client.ValidateProfileCredential`, the `X-Silo-Profile-Id` proxy header, and the primary-profile normalization (core commit `12ef0e4a`). Verify with: `grep -r ValidateProfileCredential /opt/silo_plugins/continuum-plugin-sdk/pkg` returns the helper.
 
 **Tech Stack:** Go, chi, pgx/v5, golang-migrate, gRPC (RuntimeHost). Web: React 19 + TypeScript + Vite. Tests via `go test` / `vitest`.
 
-**Conventions:** Run `go` commands from `/opt/continuum_plugins/continuum-plugin-audiobooks`. Conventional Commits; end messages with `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
+**Conventions:** Run `go` commands from `/opt/silo_plugins/silo-plugin-audiobooks`. Conventional Commits; end messages with `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
 
 **Design note — composite key:** `profileID = ""` (primary) is NOT unique across users, so every re-keyed table keeps `user_id` and ADDS `profile_id`; scoping is always `WHERE user_id = $u AND profile_id = $p`. The `progress` primary key becomes `(user_id, profile_id, book_id)`.
 
@@ -23,7 +23,7 @@
 
 - [ ] **Step 1: Confirm the SDK helper exists**
 
-Run: `ls /opt/continuum_plugins/continuum-plugin-sdk/pkg/pluginsdk/runtimehost/validate_profile_credential.go`
+Run: `ls /opt/silo_plugins/continuum-plugin-sdk/pkg/pluginsdk/runtimehost/validate_profile_credential.go`
 Expected: the file exists. If not, STOP — the prerequisite is not met.
 
 - [ ] **Step 2: Add the dev replace directive**
@@ -33,7 +33,7 @@ Append to `go.mod`:
 ```
 // Local dev: build against the in-tree SDK checkout until the
 // ValidateProfileCredential RPC is released.
-replace github.com/ContinuumApp/continuum-plugin-sdk => /opt/continuum_plugins/continuum-plugin-sdk
+replace github.com/ContinuumApp/continuum-plugin-sdk => /opt/silo_plugins/continuum-plugin-sdk
 ```
 
 - [ ] **Step 3: Tidy and verify**
@@ -273,7 +273,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ### Task 5: Wire the RuntimeHost client into the handler
 
 **Files:**
-- Modify: `internal/abs/handler.go` (Handler struct, Deps, NewHandler) and `cmd/continuum-plugin-audiobooks/main.go`
+- Modify: `internal/abs/handler.go` (Handler struct, Deps, NewHandler) and `cmd/silo-plugin-audiobooks/main.go`
 - Test: build only
 
 - [ ] **Step 1: Define the validator interface**
@@ -282,7 +282,7 @@ In `internal/abs/handler.go`, replace the `HostLoginValidator` interface (`handl
 
 ```go
 // ProfileCredentialValidator resolves a third-party "user#profile" /
-// "password#pin" login against the Continuum host. Implemented by the
+// "password#pin" login against the Silo host. Implemented by the
 // SDK runtimehost client; an interface so tests can stub it.
 type ProfileCredentialValidator interface {
 	ValidateProfileCredential(ctx context.Context, username, password string) (*runtimehost.ProfileCredential, error)
@@ -297,13 +297,13 @@ In the `Handler` struct, replace `hostLogin HostLoginValidator` with `credValida
 
 - [ ] **Step 3: Wire it in main.go**
 
-In `cmd/continuum-plugin-audiobooks/main.go`, delete the `hostLoginClient := hostlogin.New(hostBase)` line (`main.go:90`) and its comment. In the `abs.NewHandler(abs.Deps{...})` block (`main.go:213-232`), replace `HostLogin: hostLoginClient,` with:
+In `cmd/silo-plugin-audiobooks/main.go`, delete the `hostLoginClient := hostlogin.New(hostBase)` line (`main.go:90`) and its comment. In the `abs.NewHandler(abs.Deps{...})` block (`main.go:213-232`), replace `HostLogin: hostLoginClient,` with:
 
 ```go
 			CredValidator: runtimehost.NewClient(sdkruntime.Host()),
 ```
 
-Add the `runtimehost` import. Confirm the constructor name against the SDK: run `grep -rn 'func New' /opt/continuum_plugins/continuum-plugin-sdk/pkg/pluginsdk/runtimehost/client.go` and use whatever constructor returns a `*runtimehost.Client` from the `sdkruntime.Host()` handle. Remove the now-unused `hostlogin` import.
+Add the `runtimehost` import. Confirm the constructor name against the SDK: run `grep -rn 'func New' /opt/silo_plugins/continuum-plugin-sdk/pkg/pluginsdk/runtimehost/client.go` and use whatever constructor returns a `*runtimehost.Client` from the `sdkruntime.Host()` handle. Remove the now-unused `hostlogin` import.
 
 - [ ] **Step 4: Verify build fails only where expected**
 
@@ -373,11 +373,11 @@ Expected: FAIL / compile error.
 ```go
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Path A — host-proxied: the host stamped identity headers.
-	if userID := r.Header.Get("X-Continuum-User-Id"); userID != "" {
-		profileID := r.Header.Get("X-Continuum-Profile-Id") // empty = primary
-		name := r.Header.Get("X-Continuum-Profile-Name")
+	if userID := r.Header.Get("X-Silo-User-Id"); userID != "" {
+		profileID := r.Header.Get("X-Silo-Profile-Id") // empty = primary
+		name := r.Header.Get("X-Silo-Profile-Name")
 		if name == "" {
-			name = r.Header.Get("X-Continuum-User-Name")
+			name = r.Header.Get("X-Silo-User-Name")
 		}
 		h.completeLogin(w, r, userID, profileID, name)
 		return
@@ -869,7 +869,7 @@ Create `web/src/lib/profile.ts`, modelled on `web/src/lib/identity.ts`'s `captur
 // Active profile id, captured from the ?profileId= query param the core
 // app puts on the plugin SPA URL, cached in sessionStorage. Empty string
 // means the primary profile.
-const KEY = 'continuum.profileId';
+const KEY = 'silo.profileId';
 
 export function captureProfileFromURL(): void {
   const v = new URLSearchParams(window.location.search).get('profileId');
@@ -894,7 +894,7 @@ import { authHeaders } from './client';
 describe('authHeaders', () => {
   beforeEach(() => sessionStorage.clear());
   it('includes X-Profile-Id when a profile is active', () => {
-    sessionStorage.setItem('continuum.profileId', 'kids');
+    sessionStorage.setItem('silo.profileId', 'kids');
     expect(authHeaders()['X-Profile-Id']).toBe('kids');
   });
   it('omits X-Profile-Id for the primary profile', () => {
@@ -973,10 +973,10 @@ Expected: PASS / clean build.
 
 - [ ] **Step 3: Bump the manifest**
 
-Set `cmd/continuum-plugin-audiobooks/manifest.json` `"version"` to `1.2.0`. Commit:
+Set `cmd/silo-plugin-audiobooks/manifest.json` `"version"` to `1.2.0`. Commit:
 
 ```bash
-git add cmd/continuum-plugin-audiobooks/manifest.json
+git add cmd/silo-plugin-audiobooks/manifest.json
 git commit -m "chore: bump plugin to 1.2.0 for profile-aware auth
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
@@ -984,7 +984,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 - [ ] **Step 4: Deploy**
 
-Run: `/opt/continuum_plugins/install-plugin.sh /opt/continuum_plugins/continuum-plugin-audiobooks`
+Run: `/opt/silo_plugins/install-plugin.sh /opt/silo_plugins/silo-plugin-audiobooks`
 Expected: ends with `→ plugin live (HTTP 200)`.
 
 - [ ] **Step 5: Smoke-test profile login**

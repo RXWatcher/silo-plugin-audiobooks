@@ -42,8 +42,8 @@ const basename = mountPath() || '/';
 // Register the service worker so the browser will offer to install the portal
 // as a PWA. The SW lives at <mountPath>/sw.js and its scope is <mountPath>/
 // — anything more aggressive would conflict with other plugins served from
-// the same continuum origin. We register from window load so the initial
-// paint isn't delayed; HTTPS is required (continuum enforces it via the
+// the same silo origin. We register from window load so the initial
+// paint isn't delayed; HTTPS is required (silo enforces it via the
 // public URL), so we just check for the API and let registration fail
 // silently in dev / non-secure contexts.
 if ('serviceWorker' in navigator) {

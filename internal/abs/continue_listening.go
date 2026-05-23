@@ -7,8 +7,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/bookref"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/bookref"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // handleItemsInProgress — GET /abs/api/me/items-in-progress

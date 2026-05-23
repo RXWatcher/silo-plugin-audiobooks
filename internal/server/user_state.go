@@ -11,8 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/auth"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/auth"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // mountUserStateRoutes wires progress, bookmark, and rating endpoints.
@@ -138,11 +138,11 @@ func (s *Server) handleCreatePlaybackSession(w http.ResponseWriter, r *http.Requ
 	_ = json.NewDecoder(r.Body).Decode(&p)
 	deviceID := strings.TrimSpace(p.DeviceID)
 	if deviceID == "" {
-		deviceID = "continuum-web"
+		deviceID = "silo-web"
 	}
 	mediaPlayer := strings.TrimSpace(p.MediaPlayer)
 	if mediaPlayer == "" {
-		mediaPlayer = "continuum-web"
+		mediaPlayer = "silo-web"
 	}
 	info := p.DeviceInfo
 	if info == nil {

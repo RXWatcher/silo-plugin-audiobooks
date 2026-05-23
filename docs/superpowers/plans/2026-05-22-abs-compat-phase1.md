@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go, chi router, pgx/v5, golang-migrate. Tests via `go test`.
 
-**Conventions:** Run all `go` commands from the repo root `/opt/continuum_plugins/continuum-plugin-audiobooks`. Commit messages use Conventional Commits and end with the `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>` trailer.
+**Conventions:** Run all `go` commands from the repo root `/opt/silo_plugins/silo-plugin-audiobooks`. Commit messages use Conventional Commits and end with the `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>` trailer.
 
 ---
 
@@ -16,7 +16,7 @@
 
 **Files:**
 - Modify: `internal/abs/translate.go:21-22`
-- Modify: `cmd/continuum-plugin-audiobooks/manifest.json`
+- Modify: `cmd/silo-plugin-audiobooks/manifest.json`
 - Test: `internal/abs/translate_test.go`
 
 - [ ] **Step 1: Write the failing test**
@@ -51,12 +51,12 @@ Expected: PASS
 
 - [ ] **Step 5: Bump the manifest version**
 
-In `cmd/continuum-plugin-audiobooks/manifest.json`, change `"version": "1.0.3"` to `"version": "1.1.0"`.
+In `cmd/silo-plugin-audiobooks/manifest.json`, change `"version": "1.0.3"` to `"version": "1.1.0"`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add internal/abs/translate.go internal/abs/translate_test.go cmd/continuum-plugin-audiobooks/manifest.json
+git add internal/abs/translate.go internal/abs/translate_test.go cmd/silo-plugin-audiobooks/manifest.json
 git commit -m "feat(abs): report server version 2.35.0; bump plugin to 1.1.0
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
@@ -99,7 +99,7 @@ func TestHandleStatusIdentifiesAsAudiobookshelf(t *testing.T) {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/abs/ -run TestHandleStatusIdentifiesAsAudiobookshelf -v`
-Expected: FAIL — `app = continuum, want audiobookshelf`
+Expected: FAIL — `app = silo, want audiobookshelf`
 
 - [ ] **Step 3: Update `handleStatus`**
 
@@ -585,7 +585,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - Modify: `internal/abs/handler.go` — `completeLogin` signature + callers (`handleLogin`, `handleStandaloneLogin`)
 - Test: `internal/abs/handler_test.go`
 
-`completeLogin` currently emits `username: userID` (a numeric id). Source the real name: `X-Continuum-User-Name` on the header path, `hostlogin.Result.DisplayName` on the standalone path.
+`completeLogin` currently emits `username: userID` (a numeric id). Source the real name: `X-Silo-User-Name` on the header path, `hostlogin.Result.DisplayName` on the standalone path.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -632,8 +632,8 @@ In `handleLogin` (`handler.go:500-506`):
 
 ```go
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if userID := r.Header.Get("X-Continuum-User-Id"); userID != "" {
-		h.completeLogin(w, r, userID, r.Header.Get("X-Continuum-User-Name"))
+	if userID := r.Header.Get("X-Silo-User-Id"); userID != "" {
+		h.completeLogin(w, r, userID, r.Header.Get("X-Silo-User-Name"))
 		return
 	}
 	h.handleStandaloneLogin(w, r)
@@ -820,7 +820,7 @@ Expected: no output
 
 - [ ] **Step 3: Deploy**
 
-Run: `/opt/continuum_plugins/install-plugin.sh /opt/continuum_plugins/continuum-plugin-audiobooks`
+Run: `/opt/silo_plugins/install-plugin.sh /opt/silo_plugins/silo-plugin-audiobooks`
 Expected: ends with `→ plugin live (HTTP 200)`.
 
 - [ ] **Step 4: Smoke-test the published port**

@@ -1,6 +1,6 @@
-# Audiobooks Portal for Continuum
+# Audiobooks Portal for Silo
 
-`continuum.audiobooks` is the customer-facing audiobook portal in the Continuum plugin ecosystem. It owns the web SPA, the Audiobookshelf-compatible client API, the request lifecycle, library presentation, and playback sessions, while delegating catalog, file, and stream work to pluggable audiobook backends (local filesystem, BookWarehouse, etc.) and request fulfillment to a separate request-provider plugin.
+`silo.audiobooks` is the customer-facing audiobook portal in the Silo plugin ecosystem. It owns the web SPA, the Audiobookshelf-compatible client API, the request lifecycle, library presentation, and playback sessions, while delegating catalog, file, and stream work to pluggable audiobook backends (local filesystem, BookWarehouse, etc.) and request fulfillment to a separate request-provider plugin.
 
 ## Category
 
@@ -21,35 +21,35 @@ Lives under **Books/Audiobooks** in the admin sidebar.
 
 This is a portal plugin — it does not own any audiobook files itself. Operators pair it with at least one backend, and optionally a request provider:
 
-- Catalog/stream backends (audiobook_backend): [`continuum-plugin-local-audiobooks`](https://github.com/RXWatcher/continuum-plugin-local-audiobooks) for filesystem libraries, [`continuum-plugin-bookwarehouse-audio`](https://github.com/RXWatcher/continuum-plugin-bookwarehouse-audio) for an external BookWarehouse instance.
-- Request provider: [`continuum-plugin-audiobook-requests`](https://github.com/RXWatcher/continuum-plugin-audiobook-requests) handles the actual sourcing of new titles.
+- Catalog/stream backends (audiobook_backend): [`silo-plugin-local-audiobooks`](https://github.com/RXWatcher/silo-plugin-local-audiobooks) for filesystem libraries, [`silo-plugin-bookwarehouse-audio`](https://github.com/RXWatcher/silo-plugin-bookwarehouse-audio) for an external BookWarehouse instance.
+- Request provider: [`silo-plugin-audiobook-requests`](https://github.com/RXWatcher/silo-plugin-audiobook-requests) handles the actual sourcing of new titles.
 
-The host app is [`ContinuumApp/continuum`](https://github.com/ContinuumApp/continuum) and the plugin contract lives in [`ContinuumApp/continuum-plugin-sdk`](https://github.com/ContinuumApp/continuum-plugin-sdk).
+The host app is [`ContinuumApp/silo`](https://github.com/ContinuumApp/silo) and the plugin contract lives in [`ContinuumApp/continuum-plugin-sdk`](https://github.com/ContinuumApp/continuum-plugin-sdk).
 
 ## External services
 
 - **Postgres** — the plugin owns its own `audiobooks` schema for presentation libraries, requests, ABS sessions, podcasts, smart collections, share links, recommendation cache, and bookmarks. Migrations run on startup.
-- **Redis** (optional) — when `CONTINUUM_REDIS_URL` is set, the Socket.io hub uses a Redis adapter so events on one plugin replica reach clients connected to another. Unset means single-replica in-memory.
+- **Redis** (optional) — when `SILO_REDIS_URL` is set, the Socket.io hub uses a Redis adapter so events on one plugin replica reach clients connected to another. Unset means single-replica in-memory.
 - **Embedding API** (optional) — when `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` are set, the recommender powers a "similar books" shelf via an OpenAI/Gemini/Ollama-compatible endpoint. Unset means the recommender no-ops.
 - **OpenLibrary / Google Books** — free metadata enrichment used by the admin "enrich" action on sparse imports.
 - **Backend plugins** — called over the host's plugin proxy for catalog reads and the stream redirect target.
-- **Continuum host auth** — the standalone ABS login path posts body credentials to the host's `POST /api/v1/auth/login` so this plugin never touches a password itself.
+- **Silo host auth** — the standalone ABS login path posts body credentials to the host's `POST /api/v1/auth/login` so this plugin never touches a password itself.
 
 ## Configuration
 
 | Key | Required | Purpose |
 | --- | --- | --- |
-| `database_url` | yes | DSN for the dedicated `audiobooks` Postgres schema, e.g. `postgres://plugin_audiobooks:...@host:5432/continuum?search_path=audiobooks&sslmode=disable`. |
+| `database_url` | yes | DSN for the dedicated `audiobooks` Postgres schema, e.g. `postgres://plugin_audiobooks:...@host:5432/silo?search_path=audiobooks&sslmode=disable`. |
 
 All other portal settings — target backend, presentation libraries, request provider, media signing secret, ABS JWT secret, optional standalone HTTP listen address, content restrictions, custom metadata providers — are managed in the Audiobooks admin UI and persisted in this plugin's database.
 
-Relevant environment variables read at startup: `CONTINUUM_HOST_URL` / `CONTINUUM_HOST_BASE_URL` (host base for self-referential stream URLs), `CONTINUUM_PLUGIN_TOKEN` (host service token), `CONTINUUM_REDIS_URL` (optional multi-replica Socket.io adapter), and the `EMBEDDING_*` family used by the recommender.
+Relevant environment variables read at startup: `SILO_HOST_URL` / `SILO_HOST_BASE_URL` (host base for self-referential stream URLs), `SILO_PLUGIN_TOKEN` (host service token), `SILO_REDIS_URL` (optional multi-replica Socket.io adapter), and the `EMBEDDING_*` family used by the recommender.
 
 ## Event subscriptions
 
 ```text
-plugin.continuum.bookwarehouse-audio.*
-plugin.continuum.audiobook-requests.*
+plugin.silo.bookwarehouse-audio.*
+plugin.silo.audiobook-requests.*
 ```
 
 Specifically: `request_acknowledged`, `request_status_changed`, `request_fulfilled`, `request_failed`, plus `audiobook_imported` / `audiobook_failed` from the BookWarehouse backend.
@@ -82,4 +82,4 @@ Specifically: `request_acknowledged`, `request_status_changed`, `request_fulfill
 
 Local build with `make build` (builds the Vite SPA under `web/` then the Go binary). Tests with `make test`.
 
-CI builds linux-amd64 binaries on push to main via the reusable workflow in [RXWatcher/continuum-plugin-repository](https://github.com/RXWatcher/continuum-plugin-repository) and publishes them to the catalog at [`./binaries/`](https://github.com/RXWatcher/continuum-plugin-repository/tree/main/binaries).
+CI builds linux-amd64 binaries on push to main via the reusable workflow in [RXWatcher/silo-plugin-repository](https://github.com/RXWatcher/silo-plugin-repository) and publishes them to the catalog at [`./binaries/`](https://github.com/RXWatcher/silo-plugin-repository/tree/main/binaries).

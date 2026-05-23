@@ -12,13 +12,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/abs"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/auth"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/event"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/podcastfeed"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/streaming"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/abs"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/auth"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/event"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/podcastfeed"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/streaming"
 )
 
 // Deps wires the server's collaborators. SPA may be nil during early dev.
@@ -105,10 +105,10 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 // profileID extracts the active profile from the request. The host
-// proxy stamps the active profile as the X-Continuum-Profile-Id header;
+// proxy stamps the active profile as the X-Silo-Profile-Id header;
 // an empty value means the primary profile.
 func profileID(r *http.Request) string {
-	return r.Header.Get("X-Continuum-Profile-Id")
+	return r.Header.Get("X-Silo-Profile-Id")
 }
 
 // writeInternal handles an unexpected store/backend error. The underlying

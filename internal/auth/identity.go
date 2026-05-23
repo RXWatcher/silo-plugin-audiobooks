@@ -1,6 +1,6 @@
 // Package auth extracts the host-injected identity from incoming HTTP
-// requests. The continuum plugin proxy stamps X-Continuum-User-Id,
-// X-Continuum-User-Role, and X-Continuum-User-Theme headers on every
+// requests. The silo plugin proxy stamps X-Silo-User-Id,
+// X-Silo-User-Role, and X-Silo-User-Theme headers on every
 // authenticated request.
 package auth
 
@@ -27,9 +27,9 @@ func (i Identity) IsAdmin() bool { return i.Role == "admin" }
 // inbound Authorization bearer for portal→backend forwarding).
 func FromHeaders(r *http.Request) Identity {
 	id := Identity{
-		UserID: r.Header.Get("X-Continuum-User-Id"),
-		Role:   r.Header.Get("X-Continuum-User-Role"),
-		Theme:  r.Header.Get("X-Continuum-User-Theme"),
+		UserID: r.Header.Get("X-Silo-User-Id"),
+		Role:   r.Header.Get("X-Silo-User-Role"),
+		Theme:  r.Header.Get("X-Silo-User-Theme"),
 	}
 	if a := r.Header.Get("Authorization"); strings.HasPrefix(a, "Bearer ") {
 		id.Token = strings.TrimPrefix(a, "Bearer ")

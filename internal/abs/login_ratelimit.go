@@ -99,7 +99,7 @@ func (l *LoginLimiter) janitor() {
 // clientIP returns the rate-limit key for a request. The standalone listener
 // terminates the TCP connection directly with the listener's client, so
 // r.RemoteAddr is the real client IP. When the request is host-proxied the
-// X-Continuum-* headers are present and the body-creds path is never reached;
+// X-Silo-* headers are present and the body-creds path is never reached;
 // we still honour X-Forwarded-For's first hop as a defensive fallback for
 // operators who insert their own reverse proxy in front of the standalone
 // listener. Only the first hop is trusted — the rest is client-supplied.

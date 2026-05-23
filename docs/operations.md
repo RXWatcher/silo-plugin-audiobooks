@@ -149,7 +149,7 @@ what doesn't across a restart.
 | Per-IP login rate-limit state | No | Token bucket is in-process. Operators can clear a temporary lockout by restarting. |
 | `standalone_http_listen` binding | Process-scoped | Bound once via `sync.Once` per process; changing the value in admin requires a restart. |
 | Embedding recommender config | Process-scoped | Read from env at startup. Changes require restart. |
-| Single-replica Socket.io hub | Process-scoped | Multi-replica deployments need `CONTINUUM_REDIS_URL` to avoid losing cross-replica fan-out across the restart. |
+| Single-replica Socket.io hub | Process-scoped | Multi-replica deployments need `SILO_REDIS_URL` to avoid losing cross-replica fan-out across the restart. |
 
 ## Routine maintenance checklist
 

@@ -16,10 +16,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/bookref"
-	mediatoken "github.com/RXWatcher/continuum-plugin-audiobooks/internal/mediatoken"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/bookref"
+	mediatoken "github.com/RXWatcher/silo-plugin-audiobooks/internal/mediatoken"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // RSS feed publishing — listeners can expose a library item / series
@@ -230,7 +230,7 @@ func (h *Handler) openFeed(w http.ResponseWriter, r *http.Request, entityType, e
 		title = h.lookupFeedTitle(r, entityType, entityID)
 	}
 	if title == "" {
-		title = "Continuum feed"
+		title = "Silo feed"
 	}
 
 	slug, err := mintFeedSlug()
@@ -298,7 +298,7 @@ func (h *Handler) handlePublicFeed(w http.ResponseWriter, r *http.Request) {
 		Language:    "en-us",
 		Image:       rssImage{URL: absoluteCover(base, r.Host, feed.CoverPath), Title: feed.Title, Link: feedURL},
 		ITunes: itunesChannel{
-			Author:   "Continuum",
+			Author:   "Silo",
 			Image:    itunesImage{Href: absoluteCover(base, r.Host, feed.CoverPath)},
 			Category: itunesCategory{Text: "Audiobooks"},
 			Explicit: "no",

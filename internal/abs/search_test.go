@@ -11,11 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/abs"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/migrate"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/testutil"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/abs"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/migrate"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/testutil"
 )
 
 // searchFixture mounts the ABS handler against a real Postgres + a fake
@@ -154,7 +154,7 @@ func TestLibrarySearch_PodcastLibraryUsesLocalStore(t *testing.T) {
 }
 
 // doSearch issues one GET against the search route and returns the
-// response body. Sends X-Continuum-User-Id since /abs/api/* routes are
+// response body. Sends X-Silo-User-Id since /abs/api/* routes are
 // behind the bearer-auth middleware.
 func doSearch(f *searchFixture, libID int64, q string) string {
 	tok := f.loginToken("u-test")
@@ -174,7 +174,7 @@ func doSearch(f *searchFixture, libID int64, q string) string {
 func (f *searchFixture) loginToken(userID string) string {
 	f.t.Helper()
 	req := httptest.NewRequest("POST", "/abs/api/login", nil)
-	req.Header.Set("X-Continuum-User-Id", userID)
+	req.Header.Set("X-Silo-User-Id", userID)
 	w := httptest.NewRecorder()
 	f.router.ServeHTTP(w, req)
 	if w.Result().StatusCode != 200 {

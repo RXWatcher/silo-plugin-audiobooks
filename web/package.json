@@ -1,5 +1,5 @@
 {
-  "name": "continuum-plugin-audiobooks-web",
+  "name": "silo-plugin-audiobooks-web",
   "private": true,
   "version": "0.1.0",
   "type": "module",

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
 )
 
 // TestNormalize_AppliesAliasesAndDefaults pins the canonicalisation:

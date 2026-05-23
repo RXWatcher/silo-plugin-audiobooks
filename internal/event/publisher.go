@@ -1,4 +1,4 @@
-// Package event publishes named events into continuum's event hub via the
+// Package event publishes named events into silo's event hub via the
 // SDK's RuntimeHost client. Failures are logged.
 package event
 

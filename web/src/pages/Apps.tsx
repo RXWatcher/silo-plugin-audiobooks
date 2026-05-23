@@ -25,7 +25,7 @@ export default function Apps() {
         <ol className="text-muted-foreground list-decimal space-y-1 pl-5 text-sm">
           <li>Install Audiobookshelf from your app store.</li>
           <li>Tap "Add a server", paste the URL above.</li>
-          <li>Log in with your Continuum username + password.</li>
+          <li>Log in with your Silo username + password.</li>
           <li>Your audiobooks library will sync automatically.</li>
         </ol>
         <div className="flex flex-wrap gap-3 pt-2 text-sm">
@@ -97,7 +97,7 @@ function MobileLoginOptIn() {
       <Card className="bg-surface space-y-2 p-6">
         <h3 className="text-sm font-medium">Mobile-app login</h3>
         <p className="text-muted-foreground text-sm">
-          Mobile-app login is available to every account on this server. Use your Continuum username and
+          Mobile-app login is available to every account on this server. Use your Silo username and
           password directly in the Audiobookshelf app.
         </p>
       </Card>
@@ -114,7 +114,7 @@ function MobileLoginOptIn() {
             Allow mobile-app login for my account
           </Label>
           <p className="text-muted-foreground text-sm">
-            When this is on, the Audiobookshelf app can sign in to this server with your Continuum
+            When this is on, the Audiobookshelf app can sign in to this server with your Silo
             username and password. Leave it off if you only listen in the browser.
           </p>
         </div>

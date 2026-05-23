@@ -30,9 +30,9 @@ func TestMount_RootPaths_Resolve(t *testing.T) {
 		t.Errorf("GET /status = %d, want 200", w.Result().StatusCode)
 	}
 
-	// /login at server root — header-auth path with X-Continuum-User-Id.
+	// /login at server root — header-auth path with X-Silo-User-Id.
 	req = httptest.NewRequest("POST", "/login", strings.NewReader(""))
-	req.Header.Set("X-Continuum-User-Id", "u-test")
+	req.Header.Set("X-Silo-User-Id", "u-test")
 	w = httptest.NewRecorder()
 	f.router.ServeHTTP(w, req)
 	if w.Result().StatusCode != 200 {

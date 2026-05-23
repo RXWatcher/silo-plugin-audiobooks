@@ -20,11 +20,11 @@ import (
 
 	runtimehost "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/runtimehost"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/bookref"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/mediatoken"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/streaming"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/bookref"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/mediatoken"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/streaming"
 )
 
 // Handler wires the /abs/api/* and /abs/public/* surface.
@@ -65,7 +65,7 @@ type EventPublisher interface {
 }
 
 // ProfileCredentialValidator resolves a third-party "user#profile" /
-// "password#pin" login against the Continuum host. Implemented by the
+// "password#pin" login against the Silo host. Implemented by the
 // SDK runtimehost client; an interface so tests can stub it.
 type ProfileCredentialValidator interface {
 	ValidateProfileCredential(ctx context.Context, username, password string) (*runtimehost.ProfileCredential, error)
@@ -95,7 +95,7 @@ type Deps struct {
 	HostBaseFn func() string
 	InstallID  func() string
 	// CredValidator resolves standalone-port body credentials against the
-	// Continuum host via the ValidateProfileCredential RPC. May be nil;
+	// Silo host via the ValidateProfileCredential RPC. May be nil;
 	// when nil, the body-creds login path returns 503 regardless of admin
 	// mode.
 	CredValidator ProfileCredentialValidator
@@ -123,7 +123,7 @@ func NewHandler(d Deps) *Handler {
 		d.HostBaseFn = func() string { return "" }
 	}
 	if d.InstallID == nil {
-		d.InstallID = func() string { return "continuum.audiobooks" }
+		d.InstallID = func() string { return "silo.audiobooks" }
 	}
 	lim := d.LoginLimiter
 	if lim == nil {
@@ -178,12 +178,12 @@ func (h *Handler) broadcastListenerCount(ctx context.Context) {
 // absBaseURL returns the URL prefix the ABS client should resolve any
 // further response-embedded URLs against. Detection:
 //
-//   - Standalone listener: X-Continuum-* headers were stripped at
+//   - Standalone listener: X-Silo-* headers were stripped at
 //     httproutes/server.go before the handler ran. r.Host carries the
 //     listener's hostname (e.g. abs.example.com). Return
 //     "<scheme>://<host>" — origin only, no prefix.
-//   - Host-proxied: the continuum host stamps X-Continuum-User-Id on every
-//     forwarded request (continuum/internal/plugins/http_proxy.go). Return
+//   - Host-proxied: the silo host stamps X-Silo-User-Id on every
+//     forwarded request (silo/internal/plugins/http_proxy.go). Return
 //     "<scheme>://<host>/api/v1/plugins/<installID>" so subsequent URLs
 //     stay routable through the host's plugin proxy.
 //
@@ -203,7 +203,7 @@ func (h *Handler) absBaseURL(r *http.Request) string {
 	if host == "" {
 		host = r.Host
 	}
-	if r.Header.Get("X-Continuum-User-Id") != "" {
+	if r.Header.Get("X-Silo-User-Id") != "" {
 		return fmt.Sprintf("%s://%s/api/v1/plugins/%s", scheme, host, h.installID())
 	}
 	return fmt.Sprintf("%s://%s", scheme, host)
@@ -526,17 +526,17 @@ func (h *Handler) handleStatus(w http.ResponseWriter, _ *http.Request) {
 //
 // There are two ways to establish identity here:
 //
-//  1. Host-proxied path: the X-Continuum-User-Id header is set. The host
+//  1. Host-proxied path: the X-Silo-User-Id header is set. The host
 //     validated the session cookie / API token before forwarding the request,
 //     so reaching this handler with that header set is proof of a valid
-//     continuum session. Trusted unconditionally — this branch is unchanged
+//     silo session. Trusted unconditionally — this branch is unchanged
 //     from the pre-standalone-login design.
 //
 //  2. Standalone-port body-creds path: the header is absent (the standalone
-//     listener strips X-Continuum-* before invoking the handler — see
+//     listener strips X-Silo-* before invoking the handler — see
 //     httproutes/server.go). The request body holds {username, password}
 //     from an official Audiobookshelf client. We validate those credentials
-//     against the Continuum host's POST /api/v1/auth/login endpoint, which
+//     against the Silo host's POST /api/v1/auth/login endpoint, which
 //     pins on user.LocalPasswordLoginEnabled in the host's LocalProvider, so
 //     listeners without a local password fail closed.
 //
@@ -551,11 +551,11 @@ func (h *Handler) handleStatus(w http.ResponseWriter, _ *http.Request) {
 // branch is never rate-limited.
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Path A — host-proxied: the host stamped identity headers.
-	if userID := r.Header.Get("X-Continuum-User-Id"); userID != "" {
-		profileID := r.Header.Get("X-Continuum-Profile-Id") // empty = primary
-		name := r.Header.Get("X-Continuum-Profile-Name")
+	if userID := r.Header.Get("X-Silo-User-Id"); userID != "" {
+		profileID := r.Header.Get("X-Silo-Profile-Id") // empty = primary
+		name := r.Header.Get("X-Silo-Profile-Name")
 		if name == "" {
-			name = r.Header.Get("X-Continuum-User-Name")
+			name = r.Header.Get("X-Silo-User-Name")
 		}
 		h.completeLogin(w, r, userID, profileID, name)
 		return
@@ -566,7 +566,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 // handleStandaloneLogin runs the body-creds path when no host-proxied
 // identity header is present. Credentials are resolved against the
-// Continuum host's ValidateProfileCredential RPC, which owns all
+// Silo host's ValidateProfileCredential RPC, which owns all
 // "user#profile" / "password#pin" parsing and verification.
 func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) {
 	_, cfg, err := h.targetFn(r.Context())
@@ -1244,7 +1244,7 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request) {
 // redirecting. Two reasons: (1) some ABS clients don't follow redirects on
 // cover URLs (booklore-ng documents this with the same workaround at
 // src/lib/audiobookshelf/cover-handler.ts:41), and (2) the backend plugin's
-// cover endpoint lives under /api/v1/plugins/<install>/... on the continuum
+// cover endpoint lives under /api/v1/plugins/<install>/... on the silo
 // host; redirecting an ABS client connected to the standalone listener
 // (e.g. abs.example.com) to that path would 404 because the standalone
 // listener doesn't serve the host's /api/v1/plugins/* surface.
@@ -1680,7 +1680,7 @@ func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 	// Proxy audio bytes from the backend rather than redirecting. ABS
 	// clients connected via the standalone listener cannot follow a
 	// redirect into /api/v1/plugins/<install>/... (that path lives on the
-	// continuum host, not on the standalone listener's origin). Proxying
+	// silo host, not on the standalone listener's origin). Proxying
 	// the bytes ourselves means the stream stays on the listener the
 	// client is already talking to.
 	//

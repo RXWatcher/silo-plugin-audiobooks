@@ -1,6 +1,6 @@
 // Package abssocket exposes a Socket.io-compatible realtime endpoint for
 // the official Audiobookshelf clients. It runs alongside the standalone
-// HTTP listener (path /socket.io/*) — the continuum host's plugin proxy
+// HTTP listener (path /socket.io/*) — the silo host's plugin proxy
 // can't bridge websocket upgrades (the SDK's CallPluginHTTP is a typed
 // request/response RPC), so a Socket.io connection has to terminate on
 // the standalone port.
@@ -30,8 +30,8 @@ import (
 
 	"github.com/zishang520/socket.io/v2/socket"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/abs"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/abs"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // Logger is the narrow logging surface this package needs. Implementations

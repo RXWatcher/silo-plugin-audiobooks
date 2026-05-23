@@ -66,7 +66,7 @@ describe('fetchInstalledBackends', () => {
     const body = JSON.stringify([
       {
         id: 38,
-        plugin_id: 'continuum.local-audiobooks',
+        plugin_id: 'silo.local-audiobooks',
         enabled: true,
         capabilities: [
           {
@@ -84,7 +84,7 @@ describe('fetchInstalledBackends', () => {
       },
       {
         id: 40,
-        plugin_id: 'continuum.audiobook-requests',
+        plugin_id: 'silo.audiobook-requests',
         enabled: true,
         capabilities: [
           {
@@ -102,7 +102,7 @@ describe('fetchInstalledBackends', () => {
       },
       {
         id: 47,
-        plugin_id: 'continuum.bookwarehouse-audio',
+        plugin_id: 'silo.bookwarehouse-audio',
         enabled: true,
         capabilities: [
           {
@@ -150,11 +150,11 @@ describe('fetchInstalledBackends', () => {
     expect(authHeaderAt(fetchMock, 0)).toBe('Bearer backend-token');
     expect(authHeaderAt(fetchMock, 1)).toBe('Bearer backend-token');
     expect(backends.map((item) => item.plugin_id)).toEqual([
-      'continuum.local-audiobooks',
-      'continuum.bookwarehouse-audio',
+      'silo.local-audiobooks',
+      'silo.bookwarehouse-audio',
     ]);
     expect(providers.map((item) => item.plugin_id)).toEqual([
-      'continuum.audiobook-requests',
+      'silo.audiobook-requests',
     ]);
   });
 
@@ -202,7 +202,7 @@ describe('fetchInstalledBackends', () => {
           JSON.stringify([
             {
               id: 38,
-              plugin_id: 'continuum.local-audiobooks',
+              plugin_id: 'silo.local-audiobooks',
               enabled: true,
               capabilities: [
                 {
@@ -254,7 +254,7 @@ describe('fetchInstalledBackends', () => {
     expect(backends).toEqual([
       expect.objectContaining({
         id: 38,
-        plugin_id: 'continuum.local-audiobooks',
+        plugin_id: 'silo.local-audiobooks',
         audiobook_roles: ['library_source'],
       }),
     ]);
@@ -264,7 +264,7 @@ describe('fetchInstalledBackends', () => {
 describe('authHeaders', () => {
   beforeEach(() => sessionStorage.clear());
   it('includes X-Profile-Id when a profile is active', () => {
-    sessionStorage.setItem('continuum.profileId', 'kids');
+    sessionStorage.setItem('silo.profileId', 'kids');
     expect(authHeaders()['X-Profile-Id']).toBe('kids');
   });
   it('omits X-Profile-Id for the primary profile', () => {

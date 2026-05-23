@@ -33,7 +33,7 @@ func truncForError(b []byte) string {
 	return string(b[:errBodySnippet]) + "…(truncated)"
 }
 
-// HostClient issues HTTP requests to other plugins via the continuum host's
+// HostClient issues HTTP requests to other plugins via the silo host's
 // plugin proxy. The portal uses one HostClient per installed backend. Calls
 // prefer the per-request bearer from the caller and fall back to the plugin's
 // own service token when the inbound request was cookie-authenticated.
@@ -45,7 +45,7 @@ type HostClient struct {
 }
 
 // NewHostClient builds a HostClient bound to the host base URL (e.g.
-// "http://continuum:8080"). Trailing slash is tolerated.
+// "http://silo:8080"). Trailing slash is tolerated.
 func NewHostClient(hostBaseURL string) *HostClient {
 	return &HostClient{
 		base: strings.TrimRight(hostBaseURL, "/"),

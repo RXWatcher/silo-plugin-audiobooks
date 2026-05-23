@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
 )
 
 // maxOverviewRunes caps the description we feed into the embedding so
@@ -14,7 +14,7 @@ const maxOverviewRunes = 1000
 
 // BuildEmbeddingText constructs the canonical embedding-input string
 // for one audiobook. Structure mirrors the host's BuildEmbeddingText
-// (continuum/internal/recommendations/embeddings/text.go) — lead with
+// (silo/internal/recommendations/embeddings/text.go) — lead with
 // semantic content (genres + description) so the embedding model
 // doesn't anchor on title words; trailing fields add narrative spice
 // without dominating.

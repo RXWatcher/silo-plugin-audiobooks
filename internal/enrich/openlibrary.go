@@ -63,7 +63,7 @@ func SearchOpenLibrary(ctx context.Context, query string, limit int) ([]Match, e
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
 	}
-	req.Header.Set("User-Agent", "continuum-audiobooks/enrich (+https://continuumapp.com)")
+	req.Header.Set("User-Agent", "silo-audiobooks/enrich (+https://siloapp.com)")
 	resp, err := HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("openlibrary: %w", err)
@@ -143,7 +143,7 @@ func SearchGoogleBooks(ctx context.Context, query string, limit int) ([]Match, e
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
 	}
-	req.Header.Set("User-Agent", "continuum-audiobooks/enrich (+https://continuumapp.com)")
+	req.Header.Set("User-Agent", "silo-audiobooks/enrich (+https://siloapp.com)")
 	resp, err := HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("google books: %w", err)

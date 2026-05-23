@@ -320,7 +320,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       api
         .createPlaybackSession(nextBook.id, {
           current_seconds: Math.floor(resume),
-          device_id: 'continuum-web',
+          device_id: 'silo-web',
           device_info: { userAgent: navigator.userAgent },
         })
         .then((session) => {

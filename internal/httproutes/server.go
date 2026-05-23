@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
+	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
 // Server implements pluginv1.HttpRoutesServer with a swappable handler.
@@ -57,9 +57,9 @@ func (s *Server) SetSocketHandler(h http.Handler) {
 // this plugin's public routes. Before SetHandler has been called, returns 503
 // in the same shape as Handle.
 //
-// SECURITY: strips inbound X-Continuum-* headers before invoking the handler.
-// These headers are the host plane's trust channel (X-Continuum-User-Id,
-// X-Continuum-User-Role, etc. — injected by the host's plugin proxy after
+// SECURITY: strips inbound X-Silo-* headers before invoking the handler.
+// These headers are the host plane's trust channel (X-Silo-User-Id,
+// X-Silo-User-Role, etc. — injected by the host's plugin proxy after
 // session validation). A client connecting directly to the standalone port
 // must never be able to forge them, otherwise auth checks inside handlers
 // would accept attacker-supplied identity. Stripping them puts the request
@@ -70,7 +70,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// for the socket path as for the regular HTTP handler. A standalone-port
 	// client must never be able to forge identity via these headers.
 	for k := range r.Header {
-		if strings.HasPrefix(strings.ToLower(k), "x-continuum-") {
+		if strings.HasPrefix(strings.ToLower(k), "x-silo-") {
 			r.Header.Del(k)
 		}
 	}

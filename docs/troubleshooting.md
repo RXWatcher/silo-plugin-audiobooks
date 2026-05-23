@@ -12,7 +12,7 @@ walk-throughs) and `operations.md` (admin tasks).
 | Cover image broken (404 or generic placeholder) | Network tab → cover URL has `?token=` | Missing media token (`media_signing_secret` unset) or token decoded against the wrong secret. Same root cause as broken playback. |
 | Playback fails immediately ("This audio cannot be played") | Network tab → stream request status | Portal 503 (`media signing not configured`); backend 401 (secret mismatch); backend 410 (file moved); backend 404 (catalog stale, force sync). |
 | Playback fails after a delay or scrubbing past a file boundary | Network tab → second-track URL | Token TTL (15 minutes) lapsed mid-listen — SPA should re-mint; if it doesn't, the SPA's audio-error handler is broken. File the bug. |
-| Progress doesn't sync across devices | `user_book_progress` rows | Socket.io not connected on one device (check `auth_failed` in logs); multi-replica without `CONTINUUM_REDIS_URL`; one client wrote a stale "finished" sync that downgraded position-only on a finished book (real ABS protects this — confirm `is_finished` survives sync). |
+| Progress doesn't sync across devices | `user_book_progress` rows | Socket.io not connected on one device (check `auth_failed` in logs); multi-replica without `SILO_REDIS_URL`; one client wrote a stale "finished" sync that downgraded position-only on a finished book (real ABS protects this — confirm `is_finished` survives sync). |
 | "Continue Listening" shows a book the customer hid | `user_book_progress.hide_from_continue` | Sync from an ABS-compatible client that doesn't know about the hide flag re-wrote progress. Customer can re-hide; not a portal bug. |
 | Smart collection returns 0 books | Smart collection DSL preview | DSL evaluator failed silently — check plugin log for `smartcoll` errors. Often a typo in the DSL or referencing a tag that no longer exists. |
 | Reading streak resets unexpectedly | `reading_sessions` rows for the user | Reading sessions are bucketed by local date; a customer crossing time zones can lose a day. Known, not fixable without per-user TZ. |
@@ -45,7 +45,7 @@ walk-throughs) and `operations.md` (admin tasks).
 | "Similar books" shelf disappeared | `EMBEDDING_*` env + recommender warn lines | Env vars were unset on restart; embedding API unreachable; pgvector index missing (verify the `0016_embeddings` migration ran). |
 | Disk filling with cached files | `internal/cdn/`, scheduled cache evictor | The portal's old streaming cache was **removed**. If files are accumulating, look elsewhere — the backend, the host, podcast downloads from the backend, etc. |
 | Plugin restarts cut customer streams | Standalone listener shutdown grace | 10-second `Shutdown(ctx)` is the cap. Long downloads beyond 10s are killed; clients should Range-resume. Schedule restarts for low-traffic windows. |
-| Two plugin replicas, events only land on one | `CONTINUUM_REDIS_URL` | Single-replica in-memory hub. Set the Redis URL on all replicas and restart. Unparseable URL falls back to in-memory with a warn — check log for the warn. |
+| Two plugin replicas, events only land on one | `SILO_REDIS_URL` | Single-replica in-memory hub. Set the Redis URL on all replicas and restart. Unparseable URL falls back to in-memory with a warn — check log for the warn. |
 
 ## Quick diagnostic recipes
 

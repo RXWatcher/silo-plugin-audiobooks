@@ -8,11 +8,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
+	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/migrate"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/testutil"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/migrate"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/testutil"
 )
 
 func mustStruct(t *testing.T, m map[string]any) *structpb.Struct {
@@ -32,7 +32,7 @@ func mustStruct(t *testing.T, m map[string]any) *structpb.Struct {
 func TestConsumer_NotConfigured_NacksOurEvent(t *testing.T) {
 	h := New(func() *Deps { return nil }, nil)
 	resp, err := h.HandleEvent(context.Background(), &pluginv1.HandleEventRequest{
-		EventName: "plugin.continuum.bookwarehouse-audio.request_fulfilled",
+		EventName: "plugin.silo.bookwarehouse-audio.request_fulfilled",
 		Payload:   mustStruct(t, map[string]any{"request_id": "r-1", "external_id": "x"}),
 	})
 	if err == nil {
@@ -48,7 +48,7 @@ func TestConsumer_NotConfigured_NacksOurEvent(t *testing.T) {
 func TestConsumer_UnknownEvent_AcksEvenUnconfigured(t *testing.T) {
 	h := New(func() *Deps { return nil }, nil)
 	if _, err := h.HandleEvent(context.Background(), &pluginv1.HandleEventRequest{
-		EventName: "plugin.continuum.something.totally_unrelated",
+		EventName: "plugin.silo.something.totally_unrelated",
 		Payload:   mustStruct(t, map[string]any{}),
 	}); err != nil {
 		t.Fatalf("unknown event must ack, not nack; got err=%v", err)
@@ -105,7 +105,7 @@ func TestConsumer_AudiobookImported_BroadcastsItemAdded(t *testing.T) {
 	}, nil)
 
 	_, err = h.HandleEvent(context.Background(), &pluginv1.HandleEventRequest{
-		EventName: "plugin.continuum.bookwarehouse-audio.audiobook_imported",
+		EventName: "plugin.silo.bookwarehouse-audio.audiobook_imported",
 		Payload: mustStruct(t, map[string]any{
 			"external_id": "ext-1",
 			"title":       "Way of Kings",
@@ -163,7 +163,7 @@ func TestConsumer_AudiobookImported_SkipsBroadcastWhenUnwired(t *testing.T) {
 
 	h := New(func() *Deps { return &Deps{Store: st, Broadcast: nil} }, nil)
 	if _, err := h.HandleEvent(context.Background(), &pluginv1.HandleEventRequest{
-		EventName: "plugin.continuum.bookwarehouse-audio.audiobook_imported",
+		EventName: "plugin.silo.bookwarehouse-audio.audiobook_imported",
 		Payload:   mustStruct(t, map[string]any{"external_id": "ext-1"}),
 	}); err != nil {
 		t.Fatalf("HandleEvent must not error with nil broadcaster: %v", err)

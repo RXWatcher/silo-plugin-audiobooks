@@ -22,7 +22,7 @@ import (
 	"github.com/mmcdole/gofeed"
 	"github.com/oklog/ulid/v2"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // Store is the narrow surface Refresher needs. Implemented by *store.Store;
@@ -162,7 +162,7 @@ func (r *Refresher) fetchAndParse(ctx context.Context, feedURL string) (*gofeed.
 	// Some feed hosts gate on a recognisable User-Agent (defending
 	// against scrapers). Identify the plugin clearly — operators who
 	// see traffic from this UA know what's hitting them.
-	req.Header.Set("User-Agent", "continuum-audiobooks/podcast-refresher (+https://continuumapp.com)")
+	req.Header.Set("User-Agent", "silo-audiobooks/podcast-refresher (+https://siloapp.com)")
 	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.5")
 	resp, err := r.hc.Do(req)
 	if err != nil {

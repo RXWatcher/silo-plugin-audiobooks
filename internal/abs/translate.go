@@ -5,12 +5,12 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
 )
 
 // VirtualLibraryID is the single library exposed to ABS clients.
 const (
-	VirtualLibraryID   = "continuum-audiobooks"
+	VirtualLibraryID   = "silo-audiobooks"
 	VirtualLibraryName = "Audiobooks"
 	VirtualFolderID    = "main"
 	LibraryMediaType   = "book"
@@ -19,7 +19,7 @@ const (
 	// and rejects modern refresh-token semantics. See
 	// /opt/audiobookshelf-app/components/connect/ServerConnectForm.vue:731.
 	ServerVersion = "2.35.0"
-	ServerSourceTag    = "continuum"
+	ServerSourceTag    = "silo"
 )
 
 func libraryIDString(id int64) string {

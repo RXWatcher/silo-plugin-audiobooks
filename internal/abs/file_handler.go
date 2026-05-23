@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/mediatoken"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/mediatoken"
 )
 
 // handleItemFile serves the audio bytes for one file of one

@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/auth"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/auth"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // Per-user notification preferences. Categories + delivery channels

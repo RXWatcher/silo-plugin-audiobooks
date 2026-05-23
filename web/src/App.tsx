@@ -35,9 +35,9 @@ export default function App() {
                 <a
                   href="/admin/plugins"
                   className="text-muted-foreground hover:bg-surface-hover hover:text-foreground inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors"
-                  title="Back to Continuum plugins"
+                  title="Back to Silo plugins"
                 >
-                  Back to Continuum plugins
+                  Back to Silo plugins
                 </a>
                 <Admin />
               </div>

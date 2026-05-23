@@ -9,10 +9,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/bookref"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/smartcoll"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/bookref"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/smartcoll"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // Smart Collection HTTP surface — wires the smartcoll DSL + store into

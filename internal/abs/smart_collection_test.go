@@ -11,11 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/abs"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/migrate"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/testutil"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/abs"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/migrate"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/testutil"
 )
 
 func newSmartCollectionFixture(t *testing.T) (chi.Router, *store.Store, string) {
@@ -49,7 +49,7 @@ func newSmartCollectionFixture(t *testing.T) (chi.Router, *store.Store, string) 
 
 	// Mint an access token via the header path.
 	req := httptest.NewRequest("POST", "/abs/api/login", nil)
-	req.Header.Set("X-Continuum-User-Id", "u-1")
+	req.Header.Set("X-Silo-User-Id", "u-1")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Result().StatusCode != 200 {

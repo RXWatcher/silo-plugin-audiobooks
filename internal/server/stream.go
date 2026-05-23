@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/auth"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/bookref"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/auth"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/bookref"
 )
 
 // mountStreamRoutes wires GET /audiobooks/{id}/files/{idx}/stream.

@@ -8,8 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/auth"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/enrich"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/auth"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/enrich"
 )
 
 // Metadata enrichment surface — calls into OpenLibrary + Google

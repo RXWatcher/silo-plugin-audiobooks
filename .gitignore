@@ -1,4 +1,4 @@
-/continuum-plugin-audiobooks
+/silo-plugin-audiobooks
 *.test
 *.out
 .envrc

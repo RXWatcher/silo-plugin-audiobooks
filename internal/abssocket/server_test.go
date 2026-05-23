@@ -5,9 +5,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/abs"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/abssocket"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/abs"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/abssocket"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // recordingLogger captures Warn/Debug calls so we can assert on auth-reject

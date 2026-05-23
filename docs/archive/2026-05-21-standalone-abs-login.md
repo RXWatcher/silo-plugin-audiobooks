@@ -9,26 +9,26 @@ Status: in-progress
 The audiobooks plugin exposes an Audiobookshelf-compatible API at `/abs/api/*`.
 Listeners reverse-proxy a hostname (e.g. `abs.example.com`) directly to the
 plugin's standalone HTTP listener so the official Audiobookshelf mobile and web
-clients can talk to it without going through the Continuum host.
+clients can talk to it without going through the Silo host.
 
-Today the standalone listener strips every `X-Continuum-*` header
+Today the standalone listener strips every `X-Silo-*` header
 (`httproutes/server.go:51`) and `/abs/api/login` requires
-`X-Continuum-User-Id` to be set (`abs/handler.go:293`). The only documented
+`X-Silo-User-Id` to be set (`abs/handler.go:293`). The only documented
 path for a listener to obtain an ABS access token is to first log into the
-Continuum portal in a browser. The official ABS clients only POST
+Silo portal in a browser. The official ABS clients only POST
 `{username, password}` to `/login` and have no UI for pasting a pre-minted
 JWT, so the standalone port effectively has no working login flow for them.
 
 ## Goal
 
 Let listeners log into the official Audiobookshelf clients with their
-Continuum username and password directly against the standalone port, without
+Silo username and password directly against the standalone port, without
 weakening the existing trust model for host-proxied callers.
 
 ## Non-goals
 
 - Storing passwords inside the audiobooks plugin. Credential validation
-  remains the Continuum host's job.
+  remains the Silo host's job.
 - A new SDK RPC. The host's existing public `POST /api/v1/auth/login` is
   sufficient; a typed RPC can come later if a second plugin needs the same.
 - Changes to ebooks. OPDS already works with portal-issued tokens; revisit
@@ -38,7 +38,7 @@ weakening the existing trust model for host-proxied callers.
 
 ### Validation path
 
-The handler at `abs/handler.go:293` keeps its existing `X-Continuum-User-Id`
+The handler at `abs/handler.go:293` keeps its existing `X-Silo-User-Id`
 fast path. When that header is absent and admin mode is not `disabled`, the
 handler:
 
@@ -46,7 +46,7 @@ handler:
    `{"username": "...", "password": "..."}`.
 2. Calls `hostlogin.Validate(ctx, username, password, deviceName, ip)`, which
    POSTs `{username, password, provider: "local"}` to
-   `{CONTINUUM_HOST_URL}/api/v1/auth/login` and reads `{user.id, user.name}`
+   `{SILO_HOST_URL}/api/v1/auth/login` and reads `{user.id, user.name}`
    from a 200 response. `provider: "local"` pins the host to its local
    provider so OIDC-only users without a local password fail closed rather
    than fall through to an unrelated provider.
@@ -59,7 +59,7 @@ handler:
    header path. Token rows go into `abs_tokens` exactly as today.
 
 The host's `LocalProvider.Authenticate`
-(`continuum/internal/auth/provider.go:55`) already gates on
+(`silo/internal/auth/provider.go:55`) already gates on
 `user.LocalPasswordLoginEnabled`, so listeners who exist only as OIDC users
 without a local password automatically fail validation. Listeners with a
 local password set (whether their normal sign-in is local or OIDC) succeed.
@@ -101,7 +101,7 @@ two authenticated routes:
 ### Rate limiting
 
 A new in-process per-IP token bucket on the standalone `/abs/api/login`
-handler, mirroring `continuum-plugin-ebooks/internal/server/ratelimit.go`.
+handler, mirroring `silo-plugin-ebooks/internal/server/ratelimit.go`.
 30 req/s / burst 60 by source IP. Only failed body-creds attempts count
 against the bucket; successful logins and the header path do not. The host
 endpoint has its own limiter as defence-in-depth.
@@ -118,7 +118,7 @@ mode}`.
   the standalone port is established only by credential validation, never by
   trusted-proxy headers.
 - The handler refuses to validate when the host call returns a non-2xx other
-  than 401/403, mapping to 502. A misconfigured `CONTINUUM_HOST_URL` cannot
+  than 401/403, mapping to 502. A misconfigured `SILO_HOST_URL` cannot
   silently succeed.
 - Disabling the toggle for a user revokes their ability to log in via the
   body-creds path but does not invalidate their existing ABS tokens. Token
@@ -172,13 +172,13 @@ Wired publish points:
 - `POST /abs/api/items/{id}/play` → `user_session_open`
 - `POST /abs/api/session/{sid}/close` → `user_session_closed`
 
-The Continuum host plugin proxy can't bridge websocket upgrades (the
+The Silo host plugin proxy can't bridge websocket upgrades (the
 SDK's `CallPluginHTTP` is request/response), so this endpoint is
 reachable only over the standalone listener — which is also where the
 official ABS mobile and web clients actually connect.
 
 Process-scope hub by default. For multi-replica deployments, set
-`CONTINUUM_REDIS_URL` (any URL accepted by `go-redis.ParseURL`) and the
+`SILO_REDIS_URL` (any URL accepted by `go-redis.ParseURL`) and the
 plugin will wire `zishang520/socket.io-go-redis` as the Socket.io
 adapter so events published on one replica reach clients connected to
 another. An unparseable URL or unreachable Redis logs a warning and
@@ -212,9 +212,9 @@ deliberately deferred for lack of an integration target:
   the handler docstring: simultaneous double-refresh from one client
   is tolerated. No code changes needed.
 
-- **CSRF protection**: owned by the continuum host. The host's portal
+- **CSRF protection**: owned by the silo host. The host's portal
   session cookie carries `SameSite=Lax`
-  (`continuum/internal/api/handlers/auth.go:349`), which blocks the
+  (`silo/internal/api/handlers/auth.go:349`), which blocks the
   cross-site state-changing POST attack vector at the front door.
   Plugin routes inherit the protection because the host's plugin
   proxy refuses to forward requests without a validated session.

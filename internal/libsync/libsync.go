@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
 )
 
 // SyncStats summarizes a reconcile pass.

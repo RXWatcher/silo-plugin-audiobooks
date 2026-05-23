@@ -15,11 +15,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/migrate"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/server"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/testutil"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/migrate"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/server"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/testutil"
 )
 
 // liveServer builds a Server backed by a real migrated Postgres.
@@ -84,15 +84,15 @@ func jsonReq(method, path string, hdr map[string]string, body string) *http.Requ
 }
 
 var (
-	asUser  = map[string]string{"X-Continuum-User-Id": "alice", "X-Continuum-User-Role": "user"}
-	asAdmin = map[string]string{"X-Continuum-User-Id": "root", "X-Continuum-User-Role": "admin"}
+	asUser  = map[string]string{"X-Silo-User-Id": "alice", "X-Silo-User-Role": "user"}
+	asAdmin = map[string]string{"X-Silo-User-Id": "root", "X-Silo-User-Role": "admin"}
 	// asUserKids is alice acting under a non-primary profile. The host proxy
-	// stamps the active profile as X-Continuum-Profile-Id; an empty value
+	// stamps the active profile as X-Silo-Profile-Id; an empty value
 	// (asUser) means the primary profile.
 	asUserKids = map[string]string{
-		"X-Continuum-User-Id":    "alice",
-		"X-Continuum-User-Role":  "user",
-		"X-Continuum-Profile-Id": "kids",
+		"X-Silo-User-Id":    "alice",
+		"X-Silo-User-Role":  "user",
+		"X-Silo-Profile-Id": "kids",
 	}
 )
 
@@ -158,7 +158,7 @@ func TestWebPlaybackSessionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	if sess.UserID != "alice" || sess.BookID != "book1" || sess.MediaPlayer != "continuum-web" {
+	if sess.UserID != "alice" || sess.BookID != "book1" || sess.MediaPlayer != "silo-web" {
 		t.Fatalf("unexpected session: %+v", sess)
 	}
 
@@ -195,11 +195,11 @@ func TestWebPlaybackSessionOwnershipAndClosedGuards(t *testing.T) {
 	ctx := context.Background()
 
 	if err := st.InsertABSSession(ctx, store.ABSSession{
-		ID: "sess1", UserID: "alice", BookID: "book1", DeviceID: "web", MediaPlayer: "continuum-web",
+		ID: "sess1", UserID: "alice", BookID: "book1", DeviceID: "web", MediaPlayer: "silo-web",
 	}); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
-	mallory := map[string]string{"X-Continuum-User-Id": "mallory", "X-Continuum-User-Role": "user"}
+	mallory := map[string]string{"X-Silo-User-Id": "mallory", "X-Silo-User-Role": "user"}
 	w := do(h, jsonReq("PATCH", "/api/v1/playback-sessions/sess1", mallory, `{"current_seconds":10}`))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("wrong-owner sync = %d body=%s, want 404", w.Code, w.Body)
@@ -219,7 +219,7 @@ func TestWebPlaybackSessionPositionOnlySyncPreservesFinished(t *testing.T) {
 	ctx := context.Background()
 
 	if err := st.InsertABSSession(ctx, store.ABSSession{
-		ID: "sess1", UserID: "alice", BookID: "book1", DeviceID: "web", MediaPlayer: "continuum-web",
+		ID: "sess1", UserID: "alice", BookID: "book1", DeviceID: "web", MediaPlayer: "silo-web",
 	}); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
@@ -247,12 +247,12 @@ func TestWebPlaybackSessionStatsAndUserSessionList(t *testing.T) {
 	ctx := context.Background()
 
 	if err := st.InsertABSSession(ctx, store.ABSSession{
-		ID: "sess1", UserID: "alice", BookID: "book1", DeviceID: "web", MediaPlayer: "continuum-web",
+		ID: "sess1", UserID: "alice", BookID: "book1", DeviceID: "web", MediaPlayer: "silo-web",
 	}); err != nil {
 		t.Fatalf("insert alice session: %v", err)
 	}
 	if err := st.InsertABSSession(ctx, store.ABSSession{
-		ID: "sess2", UserID: "mallory", BookID: "book2", DeviceID: "web", MediaPlayer: "continuum-web",
+		ID: "sess2", UserID: "mallory", BookID: "book2", DeviceID: "web", MediaPlayer: "silo-web",
 	}); err != nil {
 		t.Fatalf("insert mallory session: %v", err)
 	}
@@ -318,8 +318,8 @@ func TestAdminSyncLibraries(t *testing.T) {
 	}
 
 	headers := map[string]string{
-		"X-Continuum-User-Id":   "root",
-		"X-Continuum-User-Role": "admin",
+		"X-Silo-User-Id":   "root",
+		"X-Silo-User-Role": "admin",
 		"Authorization":         "Bearer admin-token",
 	}
 	w := do(h, req("POST", "/api/v1/admin/libraries/sync?backend_plugin_id=11", headers))
@@ -437,8 +437,8 @@ func TestAdminSyncLibraries_GuardsBackendFailures(t *testing.T) {
 	}
 
 	headers := map[string]string{
-		"X-Continuum-User-Id":   "root",
-		"X-Continuum-User-Role": "admin",
+		"X-Silo-User-Id":   "root",
+		"X-Silo-User-Role": "admin",
 		"Authorization":         "Bearer admin-token",
 	}
 	w := do(h, req("POST", "/api/v1/admin/libraries/sync?backend_plugin_id=11", headers))

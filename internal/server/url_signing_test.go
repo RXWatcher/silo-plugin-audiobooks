@@ -9,8 +9,8 @@ import (
 // stream URL the SPA puts in <audio src>: it's an origin-relative path
 // under the host's plugin-proxy mount, with file index appended.
 func TestSignStreamURL_BuildsPluginProxyPath(t *testing.T) {
-	got := signStreamURL("continuum.bw-audio", "u-1", "book-42", 3, "")
-	want := "/api/v1/plugins/continuum.bw-audio/api/v1/stream/book-42/3"
+	got := signStreamURL("silo.bw-audio", "u-1", "book-42", 3, "")
+	want := "/api/v1/plugins/silo.bw-audio/api/v1/stream/book-42/3"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

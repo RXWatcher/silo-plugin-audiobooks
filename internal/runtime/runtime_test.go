@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
+	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -27,7 +27,7 @@ func cfgReq(t *testing.T, kv map[string]any) *pluginv1.ConfigureRequest {
 // or formatted.
 func TestConfigRedaction(t *testing.T) {
 	cfg := Config{
-		DatabaseURL:          "postgres://user:sup3rsecret@db:5432/continuum",
+		DatabaseURL:          "postgres://user:sup3rsecret@db:5432/silo",
 		StandaloneHTTPListen: "127.0.0.1:9999",
 	}
 

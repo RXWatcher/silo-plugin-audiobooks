@@ -5,13 +5,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/auth"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/auth"
 )
 
 func TestFromHeaders(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
-	r.Header.Set("X-Continuum-User-Id", "u-1")
-	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("X-Silo-User-Id", "u-1")
+	r.Header.Set("X-Silo-User-Role", "admin")
 	r.Header.Set("Authorization", "Bearer abc.def.ghi")
 	id := auth.FromHeaders(r)
 	if id.UserID != "u-1" || !id.IsAdmin() || id.Token != "abc.def.ghi" {
@@ -29,7 +29,7 @@ func TestMiddleware_StoresIdentity(t *testing.T) {
 		}
 	}))
 	r := httptest.NewRequest("GET", "/", nil)
-	r.Header.Set("X-Continuum-User-Id", "u-9")
+	r.Header.Set("X-Silo-User-Id", "u-9")
 	h.ServeHTTP(httptest.NewRecorder(), r)
 	if !called {
 		t.Errorf("not called")

@@ -14,14 +14,14 @@ describe('captureFromURL', () => {
   });
 
   it('falls back to sessionStorage for theme when URL lacks ?theme=', () => {
-    sessionStorage.setItem('continuum-theme', 'arctic');
+    sessionStorage.setItem('silo-theme', 'arctic');
     captureFromURL(new URLSearchParams('?token=abc'));
     expect(getCachedTheme()).toBe('arctic');
   });
 
   it('persists captured theme to sessionStorage', () => {
     captureFromURL(new URLSearchParams('?theme=cobalt'));
-    expect(sessionStorage.getItem('continuum-theme')).toBe('cobalt');
+    expect(sessionStorage.getItem('silo-theme')).toBe('cobalt');
   });
 
   it('returns null when neither token nor theme is provided', () => {

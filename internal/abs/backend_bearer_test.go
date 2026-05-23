@@ -13,17 +13,17 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/abs"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/migrate"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/store"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/testutil"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/abs"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/migrate"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/store"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/testutil"
 )
 
 // TestBackendCalls_DoNotForwardABSBearer guards the standalone-port flow.
 //
 // The ABS access JWT is signed with the plugin's own ABSJWTSecret; the
-// continuum host can't validate it and will 401 every backend call routed
+// silo host can't validate it and will 401 every backend call routed
 // through the host's plugin proxy. Read-side handlers (catalog/browse/
 // personalized/etc.) MUST call the backend with an empty bearer so the
 // HostClient's service-token fallback fires. Reintroducing `a.Token` here

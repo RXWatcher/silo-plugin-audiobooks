@@ -19,8 +19,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/backend"
-	"github.com/RXWatcher/continuum-plugin-audiobooks/internal/mediatoken"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/backend"
+	"github.com/RXWatcher/silo-plugin-audiobooks/internal/mediatoken"
 )
 
 // SecretProvider returns the current media signing secret. The ctx threads

@@ -74,6 +74,7 @@ type ProfileCredentialValidator interface {
 // Logger is a minimal interface to keep Handler decoupled from hclog.
 type Logger interface {
 	Warn(msg string, args ...any)
+	Info(msg string, args ...any)
 	Debug(msg string, args ...any)
 }
 
@@ -81,6 +82,7 @@ type Logger interface {
 type noopLogger struct{}
 
 func (noopLogger) Warn(string, ...any)  {}
+func (noopLogger) Info(string, ...any)  {}
 func (noopLogger) Debug(string, ...any) {}
 
 // Deps wires the handler's collaborators.
@@ -221,6 +223,10 @@ func (h *Handler) absBaseURL(r *http.Request) string {
 // every endpoint resolve, while our internal SPA continues to call
 // /abs/api/* on the same listener.
 func (h *Handler) Mount(r chi.Router) {
+	// Temporary access log while we debug mobile playback. Path-only;
+	// no query string so ?token= never lands in logs. Demote / remove
+	// once playback is settled.
+	r.Use(h.accessLog)
 	// Auth + probe routes: real ABS puts these at server ROOT (no /api
 	// prefix). Mobile app does `${serverAddress}/login`,
 	// `${serverAddress}/status`, etc.
@@ -1310,6 +1316,16 @@ func (h *Handler) handlePlay(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	indexes := make([]int, 0, len(d.Files))
+	for _, f := range d.Files {
+		indexes = append(indexes, f.Index)
+	}
+	h.logger.Info("abs /play",
+		"book_id", backendBookID,
+		"encoded_id", encodedBookID,
+		"file_count", len(d.Files),
+		"backend_indexes", indexes,
+	)
 	sessionID := ulid.Make().String()
 	// ProfileID is required on insert: the ABSSession row is read back
 	// only by id (no profile filter on GetABSSession), but downstream
@@ -1631,11 +1647,29 @@ func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.backend.HostClient().GetStream(r.Context(), "", lib.BackendPluginID, backendPath, hdrs)
 	if err != nil {
 		h.logger.Warn("abs stream proxy: upstream error",
-			"book_id", backendBookID, "file_idx", idx, "err", err.Error())
+			"book_id", backendBookID, "wire_idx", idx, "backend_idx", backendIdx, "err", err.Error())
 		http.Error(w, "stream unavailable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
+	h.logger.Info("abs stream proxy: upstream response",
+		"book_id", backendBookID,
+		"wire_idx", idx,
+		"backend_idx", backendIdx,
+		"upstream_status", resp.StatusCode,
+		"upstream_content_type", resp.Header.Get("Content-Type"),
+		"upstream_content_length", resp.Header.Get("Content-Length"),
+		"upstream_content_range", resp.Header.Get("Content-Range"),
+		"client_range", r.Header.Get("Range"),
+	)
+	if resp.StatusCode >= 400 {
+		h.logger.Warn("abs stream proxy: upstream non-2xx",
+			"book_id", backendBookID,
+			"wire_idx", idx,
+			"backend_idx", backendIdx,
+			"upstream_status", resp.StatusCode,
+		)
+	}
 
 	// Pass through everything that matters for byte serving + caching. We
 	// don't blindly copy resp.Header because that would include hop-by-hop

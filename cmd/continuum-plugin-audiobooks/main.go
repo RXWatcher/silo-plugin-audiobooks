@@ -344,6 +344,7 @@ func main() {
 type hclogAdapter struct{ l hclog.Logger }
 
 func (a hclogAdapter) Warn(msg string, args ...any)  { a.l.Warn(msg, args...) }
+func (a hclogAdapter) Info(msg string, args ...any)  { a.l.Info(msg, args...) }
 func (a hclogAdapter) Debug(msg string, args ...any) { a.l.Debug(msg, args...) }
 
 // buildABSSocketOptions constructs the optional adapter for the Socket.io

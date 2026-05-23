@@ -1721,51 +1721,288 @@ func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := h.backend.HostClient().GetStream(r.Context(), "", lib.BackendPluginID, backendPath, hdrs)
+	h.streamStitched(w, r, lib.BackendPluginID, backendPath, hdrs, backendBookID, idx, backendIdx)
+}
+
+// backendChunkBytes is bw-audio's per-response cap (stream/handler.go:152).
+// Each backend Range call returns at most this many bytes; we request
+// explicit narrow ranges of this size to avoid being clamped and to keep
+// our own loop predictable.
+const backendChunkBytes int64 = 4 * 1024 * 1024
+
+// streamStitched proxies an audio range from the backend to the client,
+// looping multiple backend requests when the client's requested range
+// exceeds the backend's per-response 4MB cap.
+//
+// The bw-audio backend caps every response at 4MB (its handler.go:152
+// clamps open-ended Ranges to keep the host plugin proxy's 8MB buffer
+// happy). For MP3 that's fine — the browser chains range requests
+// transparently. For M4B/MP4 with moov-at-end, ExoPlayer asks for the
+// file tail in one open-ended `bytes=N-` and expects to receive
+// everything from N to EOF. When it gets just 4MB back, the moov atom
+// is truncated, the parser fails, the player loops on the same range,
+// and the spinner runs forever.
+//
+// Fix: when the first backend response doesn't cover the full requested
+// range, send the client a 206 (or 200) with the FULL Content-Length
+// and stream subsequent 4MB chunks from the backend behind the scenes.
+// To the client it looks like one contiguous response from a server
+// that honors big ranges.
+func (h *Handler) streamStitched(
+	w http.ResponseWriter, r *http.Request,
+	backendPluginID, backendPath string, firstHdrs map[string]string,
+	backendBookID string, wireIdx, backendIdx int,
+) {
+	ctx := r.Context()
+	resp, err := h.backend.HostClient().GetStream(ctx, "", backendPluginID, backendPath, firstHdrs)
 	if err != nil {
 		h.logger.Warn("abs stream proxy: upstream error",
-			"book_id", backendBookID, "wire_idx", idx, "backend_idx", backendIdx, "err", err.Error())
+			"book_id", backendBookID, "wire_idx", wireIdx, "backend_idx", backendIdx, "err", err.Error())
 		http.Error(w, "stream unavailable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
+
+	clientRange := r.Header.Get("Range")
 	h.logger.Info("abs stream proxy: upstream response",
 		"book_id", backendBookID,
-		"wire_idx", idx,
+		"wire_idx", wireIdx,
 		"backend_idx", backendIdx,
 		"upstream_status", resp.StatusCode,
 		"upstream_content_type", resp.Header.Get("Content-Type"),
 		"upstream_content_length", resp.Header.Get("Content-Length"),
 		"upstream_content_range", resp.Header.Get("Content-Range"),
-		"client_range", r.Header.Get("Range"),
+		"client_range", clientRange,
 	)
 	if resp.StatusCode >= 400 {
 		h.logger.Warn("abs stream proxy: upstream non-2xx",
 			"book_id", backendBookID,
-			"wire_idx", idx,
+			"wire_idx", wireIdx,
 			"backend_idx", backendIdx,
 			"upstream_status", resp.StatusCode,
 		)
+		// Pass error responses through unchanged so the client sees
+		// the same 4xx/5xx the backend produced.
+		copyResponseHeaders(w, resp)
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+		return
 	}
 
-	// Pass through everything that matters for byte serving + caching. We
-	// don't blindly copy resp.Header because that would include hop-by-hop
-	// headers (Transfer-Encoding etc.) that Go's response writer manages
-	// itself.
-	for _, h := range []string{
+	// If the backend gave us 200 OK (full body), nothing to stitch.
+	if resp.StatusCode == http.StatusOK {
+		copyResponseHeaders(w, resp)
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, resp.Body)
+		return
+	}
+
+	// Backend returned 206. Parse what it covered and what the client
+	// actually wants.
+	upStart, upEnd, total, ok := parseUpstreamContentRange(resp.Header.Get("Content-Range"))
+	if !ok || total <= 0 {
+		// Best-effort passthrough: we can't reason about how to stitch
+		// without a valid Content-Range, so just relay this single chunk.
+		copyResponseHeaders(w, resp)
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+		return
+	}
+	desiredStart, desiredEnd := computeDesiredRange(clientRange, upStart, total)
+
+	// Fast path: backend already covered the client's full requested
+	// range in one response.
+	if upEnd >= desiredEnd {
+		copyResponseHeaders(w, resp)
+		w.WriteHeader(resp.StatusCode)
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			h.logger.Debug("abs stream proxy: copy ended",
+				"book_id", backendBookID, "file_idx", wireIdx, "err", err.Error())
+		}
+		return
+	}
+
+	// Stitch path: backend clipped to 4MB, but client wants more. Set
+	// the response headers to advertise the FULL requested range and
+	// stream chunks until we're done.
+	contentLen := desiredEnd - desiredStart + 1
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.Header().Set("Accept-Ranges", "bytes")
+	if v := resp.Header.Get("ETag"); v != "" {
+		w.Header().Set("ETag", v)
+	}
+	if v := resp.Header.Get("Last-Modified"); v != "" {
+		w.Header().Set("Last-Modified", v)
+	}
+	if v := resp.Header.Get("Cache-Control"); v != "" {
+		w.Header().Set("Cache-Control", v)
+	}
+	if clientRange == "" {
+		// Client didn't ask for partial — emit a 200 with the full body.
+		w.Header().Set("Content-Length", strconv.FormatInt(total, 10))
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.Header().Set("Content-Range",
+			"bytes "+strconv.FormatInt(desiredStart, 10)+"-"+strconv.FormatInt(desiredEnd, 10)+"/"+strconv.FormatInt(total, 10))
+		w.Header().Set("Content-Length", strconv.FormatInt(contentLen, 10))
+		w.WriteHeader(http.StatusPartialContent)
+	}
+
+	// Stream first chunk.
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		h.logger.Debug("abs stream proxy: copy ended (first chunk)",
+			"book_id", backendBookID, "err", err.Error())
+		return
+	}
+	resp.Body.Close()
+
+	// Loop subsequent chunks. Each backend call is an EXPLICIT narrow
+	// range — narrow enough that bw-audio's clampRangeHeader doesn't
+	// fire (per its `end-start+1 > streamChunkBytes` check).
+	nextStart := upEnd + 1
+	// Safety bound: max iterations covers a 4 GiB file at 4 MiB chunks.
+	const maxIter = 1024
+	for i := 0; nextStart <= desiredEnd && i < maxIter; i++ {
+		chunkEnd := nextStart + backendChunkBytes - 1
+		if chunkEnd > desiredEnd {
+			chunkEnd = desiredEnd
+		}
+		chunkHdrs := map[string]string{
+			"Range": "bytes=" + strconv.FormatInt(nextStart, 10) + "-" + strconv.FormatInt(chunkEnd, 10),
+		}
+		cresp, err := h.backend.HostClient().GetStream(ctx, "", backendPluginID, backendPath, chunkHdrs)
+		if err != nil {
+			h.logger.Warn("abs stream proxy: chunk error",
+				"book_id", backendBookID, "next_start", nextStart, "err", err.Error())
+			return
+		}
+		if cresp.StatusCode != http.StatusPartialContent && cresp.StatusCode != http.StatusOK {
+			h.logger.Warn("abs stream proxy: chunk non-2xx",
+				"book_id", backendBookID, "next_start", nextStart, "status", cresp.StatusCode)
+			cresp.Body.Close()
+			return
+		}
+		_, chunkUpEnd, _, ok := parseUpstreamContentRange(cresp.Header.Get("Content-Range"))
+		if !ok {
+			// No Content-Range on the chunk response — best effort
+			// copy then stop.
+			_, _ = io.Copy(w, cresp.Body)
+			cresp.Body.Close()
+			return
+		}
+		if chunkUpEnd <= nextStart-1 {
+			// Backend isn't advancing; bail to avoid an infinite loop.
+			h.logger.Warn("abs stream proxy: backend chunk not advancing",
+				"book_id", backendBookID, "next_start", nextStart, "chunk_end", chunkUpEnd)
+			cresp.Body.Close()
+			return
+		}
+		if _, err := io.Copy(w, cresp.Body); err != nil {
+			h.logger.Debug("abs stream proxy: copy ended (chunk)",
+				"book_id", backendBookID, "next_start", nextStart, "err", err.Error())
+			cresp.Body.Close()
+			return
+		}
+		cresp.Body.Close()
+		nextStart = chunkUpEnd + 1
+	}
+}
+
+// parseUpstreamContentRange parses a Content-Range header in the form
+// "bytes <start>-<end>/<total>" and returns the three integers. ok is
+// false if the value is malformed or missing.
+func parseUpstreamContentRange(s string) (start, end, total int64, ok bool) {
+	const prefix = "bytes "
+	if !strings.HasPrefix(s, prefix) {
+		return 0, 0, 0, false
+	}
+	rest := s[len(prefix):]
+	slash := strings.IndexByte(rest, '/')
+	if slash < 0 {
+		return 0, 0, 0, false
+	}
+	rangePart := rest[:slash]
+	totalStr := rest[slash+1:]
+	dash := strings.IndexByte(rangePart, '-')
+	if dash < 0 {
+		return 0, 0, 0, false
+	}
+	startV, err := strconv.ParseInt(rangePart[:dash], 10, 64)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	endV, err := strconv.ParseInt(rangePart[dash+1:], 10, 64)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	totalV, err := strconv.ParseInt(totalStr, 10, 64)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	return startV, endV, totalV, true
+}
+
+// computeDesiredRange figures out the byte range the client actually
+// wants given its Range header and the total file size we've learned
+// from the upstream Content-Range. Returns the closed [start, end]
+// pair. When clientRange is empty we treat the request as "0 to end".
+// Suffix ranges (bytes=-N) translate to "last N bytes".
+func computeDesiredRange(clientRange string, upstreamStart, total int64) (start, end int64) {
+	end = total - 1
+	if clientRange == "" {
+		return 0, end
+	}
+	if !strings.HasPrefix(clientRange, "bytes=") {
+		return upstreamStart, end
+	}
+	rng := clientRange[len("bytes="):]
+	if strings.Contains(rng, ",") {
+		return upstreamStart, end
+	}
+	dash := strings.IndexByte(rng, '-')
+	if dash < 0 {
+		return upstreamStart, end
+	}
+	if dash == 0 {
+		// Suffix: bytes=-N → last N bytes.
+		n, err := strconv.ParseInt(rng[1:], 10, 64)
+		if err != nil || n <= 0 {
+			return upstreamStart, end
+		}
+		if n > total {
+			return 0, end
+		}
+		return total - n, end
+	}
+	startV, err := strconv.ParseInt(rng[:dash], 10, 64)
+	if err != nil {
+		return upstreamStart, end
+	}
+	if dash == len(rng)-1 {
+		// Open-ended: bytes=N-
+		return startV, end
+	}
+	endV, err := strconv.ParseInt(rng[dash+1:], 10, 64)
+	if err != nil {
+		return startV, end
+	}
+	if endV >= total {
+		endV = total - 1
+	}
+	return startV, endV
+}
+
+// copyResponseHeaders forwards the byte-serving and caching headers
+// from an upstream response to the client. Skips hop-by-hop headers
+// (Transfer-Encoding, Connection) that Go's response writer manages.
+func copyResponseHeaders(w http.ResponseWriter, resp *http.Response) {
+	for _, name := range []string{
 		"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges",
 		"ETag", "Last-Modified", "Cache-Control",
 	} {
-		if v := resp.Header.Get(h); v != "" {
-			w.Header().Set(h, v)
+		if v := resp.Header.Get(name); v != "" {
+			w.Header().Set(name, v)
 		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		// Common when the client closes the connection mid-playback
-		// (skip-forward, app backgrounded). Debug-level only.
-		h.logger.Debug("abs stream proxy: copy ended",
-			"book_id", backendBookID, "file_idx", idx, "err", err.Error())
 	}
 }
 

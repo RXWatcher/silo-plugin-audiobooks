@@ -20,7 +20,6 @@ import (
 // total=0 rather than 404. The mobile client renders the "similar"
 // shelf as empty rather than showing an error.
 func (h *Handler) handleSimilarItems(w http.ResponseWriter, r *http.Request) {
-	a, _ := absAuthFrom(r)
 	encoded := chi.URLParam(r, "id")
 	libID, backendBookID, _ := bookref.Decode(encoded)
 	if libID == 0 || backendBookID == "" {
@@ -67,7 +66,7 @@ func (h *Handler) handleSimilarItems(w http.ResponseWriter, r *http.Request) {
 		if c.LibraryID != libID {
 			continue
 		}
-		summary, err := h.backend.GetDetail(r.Context(), a.Token, lib.BackendPluginID, c.BookID)
+		summary, err := h.backend.GetDetail(r.Context(), "", lib.BackendPluginID, c.BookID)
 		if err != nil {
 			continue
 		}

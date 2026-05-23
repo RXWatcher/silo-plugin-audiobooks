@@ -41,6 +41,7 @@ func (h *Handler) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 	bm := store.Bookmark{
 		ID:              ulid.Make().String(),
 		UserID:          a.UserID,
+		ProfileID:       a.ProfileID,
 		BookID:          itemID,
 		PositionSeconds: int(body.Time),
 		Note:            body.Title,
@@ -69,6 +70,7 @@ func (h *Handler) handleUpdateBookmark(w http.ResponseWriter, r *http.Request) {
 	bm := store.Bookmark{
 		ID:              ulid.Make().String(), // only used when row doesn't exist yet
 		UserID:          a.UserID,
+		ProfileID:       a.ProfileID,
 		BookID:          itemID,
 		PositionSeconds: int(body.Time),
 		Note:            body.Title,

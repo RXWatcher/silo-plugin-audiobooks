@@ -192,7 +192,11 @@ func (s *Server) handleUpdatePlaybackSession(w http.ResponseWriter, r *http.Requ
 	if p.CurrentSeconds != nil {
 		current = *p.CurrentSeconds
 	}
-	if err := s.d.Store.UpdateABSSession(r.Context(), sid, current); err != nil {
+	listened := 0
+	if p.TimeListened != nil && *p.TimeListened > 0 {
+		listened = *p.TimeListened
+	}
+	if err := s.d.Store.UpdateABSSession(r.Context(), sid, current, listened); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusConflict, "playback session is closed")
 			return

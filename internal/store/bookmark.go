@@ -116,6 +116,35 @@ func (s *Store) UpsertBookmarkAt(ctx context.Context, b Bookmark) error {
 	return nil
 }
 
+// ListRecentBookmarksForUser returns the user's most recently created
+// bookmarks across all books within a profile, capped at limit. Used to
+// seed the ABS /me response's `bookmarks` array so the mobile client
+// shows bookmarks before any per-item GET happens.
+func (s *Store) ListRecentBookmarksForUser(ctx context.Context, userID, profileID string, limit int) ([]Bookmark, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, user_id, profile_id, book_id, position_seconds, COALESCE(chapter_id,''), note, created_at
+		FROM bookmark WHERE user_id = $1 AND profile_id = $2
+		ORDER BY created_at DESC
+		LIMIT $3
+	`, userID, profileID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list user bookmarks: %w", err)
+	}
+	defer rows.Close()
+	var out []Bookmark
+	for rows.Next() {
+		var b Bookmark
+		if err := rows.Scan(&b.ID, &b.UserID, &b.ProfileID, &b.BookID, &b.PositionSeconds, &b.ChapterID, &b.Note, &b.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan bookmark: %w", err)
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 // DeleteBookmarkAt removes a bookmark by (user, profile, book, position).
 // Idempotent — deleting a non-existent bookmark is not an error
 // (matches real ABS, which 200s either way).

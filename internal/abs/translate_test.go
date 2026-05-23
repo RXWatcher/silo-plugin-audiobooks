@@ -127,3 +127,63 @@ func TestServerVersionIsCurrentRelease(t *testing.T) {
 		t.Fatalf("ServerVersion = %q, want 2.35.0", abs.ServerVersion)
 	}
 }
+
+// TestToLibraryItem_EmitsPlayButtonGatingFields pins the contract the ABS
+// mobile client uses to decide whether to show the play button:
+//
+//	showPlay = !isMissing && !isInvalid && (media.tracks.length || episodes.length)
+//
+// Ref: /opt/audiobookshelf-app/pages/item/_id/index.vue:423-427,445
+//
+// Regression we hit in May 2026: only `media.audioFiles` was populated;
+// `media.tracks` and the top-level `isMissing`/`isInvalid` fields were
+// absent, so the item page rendered metadata but no play affordance.
+func TestToLibraryItem_EmitsPlayButtonGatingFields(t *testing.T) {
+	d := backend.AudiobookDetail{
+		AudiobookSummary: backend.AudiobookSummary{
+			ID:              "bw-9",
+			Title:           "Test Book",
+			DurationSeconds: 3600,
+		},
+		Files: []backend.AudiobookFile{
+			{Index: 1, MimeType: "audio/mpeg", Format: "mp3", DurationSeconds: 1800},
+			{Index: 2, MimeType: "audio/mpeg", Format: "mp3", DurationSeconds: 1800},
+		},
+	}
+	got := abs.ToLibraryItem(d, func(i int) string {
+		return "https://example.test/file/" + string(rune('0'+i))
+	})
+
+	raw, _ := json.Marshal(got)
+	s := string(raw)
+	// Top-level gating flags must be present as explicit booleans (the
+	// client treats undefined as truthy in some branches — `omitempty`
+	// on a bool would drop them).
+	if !strings.Contains(s, `"isMissing":false`) {
+		t.Errorf("json missing isMissing=false: %s", s)
+	}
+	if !strings.Contains(s, `"isInvalid":false`) {
+		t.Errorf("json missing isInvalid=false: %s", s)
+	}
+	// media.tracks must mirror the file list (separate from audioFiles)
+	// because the item-detail page reads media.tracks.length to gate the
+	// play button.
+	if n := len(got.Media.Tracks); n != 2 {
+		t.Fatalf("media.tracks length = %d, want 2", n)
+	}
+	if got.Media.Tracks[0].ContentURL == "" {
+		t.Errorf("media.tracks[0].contentUrl is empty")
+	}
+	if n := len(got.Media.AudioFiles); n != 2 {
+		t.Fatalf("media.audioFiles length = %d, want 2", n)
+	}
+	if got.Media.NumTracks != 2 {
+		t.Errorf("media.numTracks = %d, want 2", got.Media.NumTracks)
+	}
+	// `tracks` key must appear distinct from `audioFiles` — the client
+	// checks them separately and a renamed/shared field broke the
+	// rendering in the regression above.
+	if !strings.Contains(s, `"tracks":[`) {
+		t.Errorf("json missing media.tracks array: %s", s)
+	}
+}

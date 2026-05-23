@@ -54,13 +54,23 @@ func (s *Store) InsertABSSession(ctx context.Context, sess ABSSession) error {
 	return nil
 }
 
-// UpdateABSSession bumps current_time_ms and last_update.
-func (s *Store) UpdateABSSession(ctx context.Context, id string, currentTime int) error {
+// UpdateABSSession bumps current_time_ms, last_update, and accumulates the
+// delta-since-last-tick on time_listening_seconds. The mobile client sends a
+// monotonically increasing currentTime AND a per-tick delta (timeListened);
+// we use the delta because the absolute time can jump (chapter skip, seek)
+// in ways that aren't actual listening. listenedDelta clamps to 0 — guarding
+// against negative values from a buggy client or a clock reset.
+func (s *Store) UpdateABSSession(ctx context.Context, id string, currentTime int, listenedDelta int) error {
+	if listenedDelta < 0 {
+		listenedDelta = 0
+	}
 	res, err := s.pool.Exec(ctx, `
 		UPDATE abs_playback_session
-		SET current_time_ms = $2, last_update = now()
+		SET current_time_ms = $2,
+		    last_update = now(),
+		    time_listening_seconds = time_listening_seconds + $3
 		WHERE id = $1 AND closed_at IS NULL
-	`, id, currentTime)
+	`, id, currentTime, listenedDelta)
 	if err != nil {
 		return fmt.Errorf("update abs_session: %w", err)
 	}

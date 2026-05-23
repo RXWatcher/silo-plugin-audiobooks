@@ -57,6 +57,14 @@ type LibraryItem struct {
 	LibraryID       string             `json:"libraryId"`
 	FolderID        string             `json:"folderId"`
 	MediaType       string             `json:"mediaType"`
+	// IsMissing / IsInvalid are gating fields the ABS mobile client checks
+	// before rendering the play affordance — `showPlay = !isMissing &&
+	// !isInvalid && (numTracks || episodes.length)`. We always emit them
+	// (no omitempty) so the client never sees them as undefined; the
+	// catalog we serve is by definition present and valid.
+	// Ref: /opt/audiobookshelf-app/pages/item/_id/index.vue:445
+	IsMissing       bool               `json:"isMissing"`
+	IsInvalid       bool               `json:"isInvalid"`
 	Media           LibraryItemMedia   `json:"media"`
 	NumTracks       int                `json:"numTracks,omitempty"`
 	AddedAt         int64              `json:"addedAt"`
@@ -76,12 +84,21 @@ type CollapsedSeriesV1 struct {
 }
 
 // LibraryItemMedia carries the bulk of the metadata.
+//
+// ABS distinguishes between `audioFiles` (file-level metadata) and `tracks`
+// (the playback ordering the player iterates). For most audiobooks they're
+// the same slice; we emit both because the item-detail page reads
+// `media.tracks.length` to decide whether to render the play button
+// (see /opt/audiobookshelf-app/pages/item/_id/index.vue:423-427,445), while
+// card / list views read `media.numTracks`.
 type LibraryItemMedia struct {
-	Metadata  Metadata     `json:"metadata"`
-	Duration  float64      `json:"duration"`
-	CoverPath string       `json:"coverPath"`
-	Tracks    []AudioTrack `json:"audioFiles,omitempty"`
-	Chapters  []ChapterABS `json:"chapters,omitempty"`
+	Metadata   Metadata     `json:"metadata"`
+	Duration   float64      `json:"duration"`
+	CoverPath  string       `json:"coverPath"`
+	AudioFiles []AudioTrack `json:"audioFiles"`
+	Tracks     []AudioTrack `json:"tracks"`
+	Chapters   []ChapterABS `json:"chapters"`
+	NumTracks  int          `json:"numTracks"`
 }
 
 // Metadata is the book-level metadata block. Authors / Narrators / Series
@@ -98,9 +115,14 @@ type Metadata struct {
 	Genres        []string    `json:"genres,omitempty"`
 }
 
-// AudioTrack is a single playable file.
+// AudioTrack is a single playable file. StartOffset is the cumulative
+// duration (in seconds) of all preceding tracks — the audiobookshelf-app
+// audio player uses it to map a global playback position onto an individual
+// file. Missing startOffset leaves the player stuck in BUFFERING after
+// load because it can't compute where the file sits in the global timeline.
 type AudioTrack struct {
-	Index      int     `json:"index"`
+	Index       int     `json:"index"`
+	StartOffset float64 `json:"startOffset"`
 	ContentURL string  `json:"contentUrl"`
 	MimeType   string  `json:"mimeType"`
 	Duration   float64 `json:"duration"`
@@ -136,14 +158,17 @@ func ToLibraryItem(d backend.AudiobookDetail, contentURLFn func(int) string) Lib
 	}
 
 	tracks := make([]AudioTrack, len(d.Files))
+	var cumulative float64
 	for i, f := range d.Files {
 		tracks[i] = AudioTrack{
-			Index:      f.Index,
-			MimeType:   f.MimeType,
-			Codec:      f.Format,
-			Duration:   float64(f.DurationSeconds),
-			ContentURL: contentURLFn(f.Index),
+			Index:       f.Index,
+			StartOffset: cumulative,
+			MimeType:    f.MimeType,
+			Codec:       f.Format,
+			Duration:    float64(f.DurationSeconds),
+			ContentURL:  contentURLFn(f.Index),
 		}
+		cumulative += float64(f.DurationSeconds)
 	}
 	chapters := make([]ChapterABS, len(d.Chapters))
 	for i, c := range d.Chapters {
@@ -161,11 +186,13 @@ func ToLibraryItem(d backend.AudiobookDetail, contentURLFn func(int) string) Lib
 		FolderID:  VirtualFolderID,
 		MediaType: LibraryMediaType,
 		Media: LibraryItemMedia{
-			Metadata:  meta,
-			Duration:  float64(d.DurationSeconds),
-			CoverPath: pickCoverPath(d.AudiobookSummary),
-			Tracks:    tracks,
-			Chapters:  chapters,
+			Metadata:   meta,
+			Duration:   float64(d.DurationSeconds),
+			CoverPath:  pickCoverPath(d.AudiobookSummary),
+			AudioFiles: tracks,
+			Tracks:     tracks,
+			Chapters:   chapters,
+			NumTracks:  len(d.Files),
 		},
 		NumTracks: len(d.Files),
 		AddedAt:   d.AddedAtMs,
@@ -182,9 +209,12 @@ func ToLibrarySummary(s backend.AudiobookSummary) LibraryItem {
 		FolderID:  VirtualFolderID,
 		MediaType: LibraryMediaType,
 		Media: LibraryItemMedia{
-			Metadata:  buildMetadata(s),
-			Duration:  float64(s.DurationSeconds),
-			CoverPath: pickCoverPath(s),
+			Metadata:   buildMetadata(s),
+			Duration:   float64(s.DurationSeconds),
+			CoverPath:  pickCoverPath(s),
+			AudioFiles: []AudioTrack{},
+			Tracks:     []AudioTrack{},
+			Chapters:   []ChapterABS{},
 		},
 		AddedAt:   s.AddedAtMs,
 		UpdatedAt: s.UpdatedAtMs,

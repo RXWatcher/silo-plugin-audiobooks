@@ -145,6 +145,7 @@ func (h *Handler) handlePlayEpisode(w http.ResponseWriter, r *http.Request) {
 	sess := store.ABSSession{
 		ID:          sessionID,
 		UserID:      a.UserID,
+		ProfileID:   a.ProfileID,
 		BookID:      encodedEpisodeID,
 		DeviceID:    deviceID,
 		DeviceInfo:  playPayload.DeviceInfo,
@@ -169,18 +170,41 @@ func (h *Handler) handlePlayEpisode(w http.ResponseWriter, r *http.Request) {
 	})
 	h.broadcastListenerCount(r.Context())
 
+	// Resume position: read prior per-episode progress so the player
+	// seeds startTime/currentTime correctly. Without these the mobile
+	// player loads at 0 and gets stuck in BUFFERING — same root cause
+	// as the audiobook handlePlay fix. Podcast progress is keyed on
+	// (userID, episodeID); not profile-scoped today.
+	var currentTime float64
+	if prog, err := h.store.GetPodcastEpisodeProgress(r.Context(), a.UserID, episode.ID); err == nil {
+		currentTime = float64(prog.CurrentSeconds)
+	}
+	nowMs := time.Now().UnixMilli()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":            sessionID,
+		"userId":        a.UserID,
 		"libraryItemId": encodedID,
 		"episodeId":     encodedEpisodeID,
+		"mediaType":     "podcast",
+		"playMethod":    0,
+		"mediaPlayer":   playPayload.MediaPlayer,
+		"deviceInfo":    playPayload.DeviceInfo,
+		"serverVersion": ServerVersion,
 		"audioTracks": []map[string]any{{
-			"index":      0,
-			"contentUrl": episode.AudioURL,
-			"mimeType":   episode.AudioMimeType,
-			"duration":   float64(episode.DurationSeconds),
+			"index":       0,
+			"startOffset": 0.0,
+			"contentUrl":  episode.AudioURL,
+			"mimeType":    episode.AudioMimeType,
+			"duration":    float64(episode.DurationSeconds),
 		}},
-		"mediaPlayer": playPayload.MediaPlayer,
-		"sessionToken": tok,
+		"chapters":      []ChapterABS{},
+		"duration":      float64(episode.DurationSeconds),
+		"currentTime":   currentTime,
+		"startTime":     currentTime,
+		"timeListening": 0,
+		"startedAt":     nowMs,
+		"updatedAt":     nowMs,
+		"sessionToken":  tok,
 	})
 }
 
